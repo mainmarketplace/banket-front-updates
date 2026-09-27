@@ -42,7 +42,7 @@ def log(msg):
         pass
 
 def load_config():
-    with open(CONFIG_PATH, encoding="utf-8") as f:
+    with open(CONFIG_PATH, encoding="utf-8-sig") as f:  # -sig: допускаем BOM от PowerShell
         return json.load(f)
 
 CFG = load_config()
@@ -94,7 +94,7 @@ def seed_if_empty():
     for fn, path in m.items():
         fp = os.path.join(SEED_DIR, fn)
         if os.path.exists(fp):
-            with open(fp, encoding="utf-8") as f:
+            with open(fp, encoding="utf-8-sig") as f:
                 doc_set(path, json.load(f))
             log("  залито: " + path)
 
