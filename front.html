@@ -1,0 +1,1034 @@
+<title>Банкеты Любавы</title>
+<style>
+/* Визуал в стиле iikoFront: тёмно-серый фон, белые плоские плитки, жёлто-зелёное выделение */
+:root{
+  --bg:#3F4040; --bar:#2A2B2B; --head:#FFFFFF; --tile:#FFFFFF; --tile2:#F2F2F2;
+  --ink:#1E1E1E; --ink-inv:#FFFFFF; --muted:#8B8B8B; --line:#C8C8C8; --dline:#565656;
+  --sel:#E3E982; --sel-dk:#D6DE6A; --purple:#9C6BB3; --blue:#5C8FBC; --green:#33A98C;
+  --teal:#2FA985; --red:#D9534F; --gray-tile:#6E7B84; --numpad-shade:#E4E4E4;
+  --dark-tile:#4A4B4C;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink-inv);
+  font:15px/1.35 "Segoe UI",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;overflow:hidden}
+#app{display:flex;flex-direction:column;height:100vh}
+/* верхняя белая полоса */
+.tophead{background:var(--head);color:var(--ink);min-height:56px;display:flex;align-items:center;gap:14px;padding:6px 16px;flex-wrap:wrap}
+.tophead .t1{font-size:22px;font-weight:600}
+.tophead .t2{font-size:13px;color:var(--muted)}
+.tophead .spacer{flex:1}
+.tinybar{background:#EDEDED;color:#555;font-size:11px;padding:2px 10px;display:flex;gap:14px}
+.tinybar .r{margin-left:auto}
+/* основная область */
+.screen{flex:1;overflow:auto;padding:10px}
+/* нижняя тёмная панель */
+.botbar{background:var(--bar);display:flex;align-items:stretch;min-height:74px}
+.botbar .bb{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+  padding:8px 18px;color:#DDD;font-size:12px;text-transform:uppercase;letter-spacing:.03em;cursor:pointer;border:none;background:none;min-width:86px}
+.botbar .bb:hover{background:#3A3B3B}
+.botbar .bb .ic{font-size:22px;line-height:1}
+.botbar .bb.right{margin-left:auto}
+.botbar .bb.accent{color:#fff;font-weight:600}
+.botbar .bb:disabled{opacity:.35;cursor:default}
+/* плитки-кнопки */
+.wtile{background:var(--tile);color:var(--ink);border:1px solid #B5B5B5;border-radius:2px;
+  padding:14px;cursor:pointer;font:inherit;text-align:center}
+.wtile:hover{background:var(--tile2)}
+.wtile:disabled{color:#AAA;cursor:default;background:#E9E9E9}
+.wtile.on{background:var(--sel)}
+/* главный экран */
+.home{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:1500px}
+.hcol{display:flex;flex-direction:column;gap:10px}
+.hsec .hhead{padding:12px;text-align:center;font-size:19px;font-weight:600;color:#fff}
+.hsec .hbody{display:flex;flex-direction:column}
+.hsec .hbody .wtile{border-radius:0;border-top:none;padding:22px 12px;font-size:16px}
+.hsec .hbody .wtile:first-child{border-top:1px solid #B5B5B5}
+.kassa-info{color:#fff;font-size:13px;padding:8px 12px;line-height:1.5}
+.kassa-grid{display:grid;grid-template-columns:1fr 1fr;gap:2px;background:#B5B5B5;border:1px solid #B5B5B5}
+.kassa-grid .wtile{border:none;border-radius:0;padding:24px 10px;font-size:15px}
+.usertile{color:#fff;padding:18px 12px;text-align:center}
+.usertile .un{font-size:19px;font-weight:600;margin-bottom:10px}
+/* список банкетов */
+.listtop{display:flex;align-items:center;gap:6px;background:var(--bar);margin:-10px -10px 0;padding:6px 10px}
+.listtop .icbtn{background:none;border:none;color:#eee;display:flex;flex-direction:column;align-items:center;gap:3px;
+  font-size:11px;text-transform:uppercase;padding:6px 14px;cursor:pointer;border-radius:2px}
+.listtop .icbtn .ic{font-size:24px}
+.listtop .icbtn.on{background:var(--sel);color:var(--ink)}
+.datenav{display:flex;align-items:center;gap:10px;margin:0 auto;color:#fff}
+.datenav b{font-size:21px;font-weight:600}
+.datenav small{display:block;text-align:center;color:#bbb}
+.datenav .arr{background:none;border:none;color:#fff;font-size:28px;cursor:pointer;padding:0 12px}
+.statchips{display:flex;background:#3A3B3B;margin:0 -10px;border-bottom:1px solid var(--dline)}
+.statchips .sc{flex:1;text-align:center;padding:13px 6px;font-size:16px;color:#ccc;cursor:pointer;border:none;background:none}
+.statchips .sc b{margin-left:6px}
+.statchips .sc.on{background:var(--sel);color:var(--ink)}
+.statchips .sc.dark{background:#2E2F2F}
+table.ilist{border-collapse:collapse;width:100%;margin-top:0}
+table.ilist th{background:#8A97A0;color:#fff;font-weight:400;font-size:14px;text-align:left;padding:9px 10px}
+table.ilist td{background:var(--tile);color:var(--ink);padding:12px 10px;border-bottom:2px solid var(--bg);font-size:15px;vertical-align:middle}
+table.ilist tr{cursor:pointer}
+table.ilist tr:hover td{background:var(--tile2)}
+td.stat-late{background:var(--red)!important;color:#fff;text-align:center;font-size:13px}
+td.stat-ok{background:#8BC34A!important;color:#fff;text-align:center;font-size:13px}
+td.stat-neu{text-align:center;font-size:13px;color:#666!important}
+.cnt{text-align:center}
+/* карточка банкета */
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px;max-width:1300px;margin:14px auto}
+.fgroup{display:flex;flex-direction:column}
+.fgroup .gt{color:#eee;text-align:center;font-size:17px;margin-bottom:10px}
+.frow{display:grid;grid-template-columns:170px 1fr;border:1px solid #B5B5B5;border-top:none}
+.frow:first-of-type{border-top:1px solid #B5B5B5}
+.frow .fl{background:#E8E2DC;color:#333;padding:14px 12px;text-align:right;font-size:15px;display:flex;align-items:center;justify-content:flex-end}
+.frow .fv{background:var(--tile)}
+.frow .fv input,.frow .fv select{width:100%;height:100%;border:none;background:none;font:inherit;font-size:16px;color:var(--ink);padding:14px 12px;outline:none}
+.frow .fv.req{background:#F6D7D7}
+.frow .fv.req input{background:none}
+.card-actions{display:flex;flex-direction:column;gap:2px;margin-top:14px}
+.card-actions .row2{display:grid;grid-template-columns:1fr 1fr;gap:2px}
+.card-actions .wtile{padding:20px 10px}
+.card-actions .gray{background:#B9B9B9;color:#666}
+/* экран заказа */
+.order-wrap{display:grid;grid-template-columns:420px 1fr;gap:10px;height:100%}
+.check{background:var(--tile);color:var(--ink);display:flex;flex-direction:column;overflow:hidden}
+.check .chead{background:#AEB8BF;color:#fff;padding:8px 12px;font-size:14px;display:flex;gap:16px;align-items:center}
+.check .gtitle{background:var(--sel);padding:8px 12px;font-weight:600;text-align:center}
+.check .items{flex:1;overflow:auto}
+.check .ci{display:grid;grid-template-columns:44px 1fr 110px;align-items:center;padding:10px 8px;border-bottom:1px solid #E2E2E2;cursor:pointer;font-size:15px}
+.check .ci.on{background:var(--sel)}
+.check .ci .qty{color:#444}
+.check .ci .sum{text-align:right;font-variant-numeric:tabular-nums}
+.check .totals{border-top:2px solid #999}
+.disc-panel{display:grid;grid-template-columns:150px 1fr;border-top:1px solid #ccc}
+.disc-panel .dp1{padding:8px 10px;border-right:1px solid #ccc;cursor:pointer}
+.disc-panel .dp1 small{display:block;color:#888;font-size:10px;text-transform:uppercase}
+.disc-panel .dp1 b{font-size:17px}
+.sumline{display:flex;justify-content:space-between;padding:5px 12px;font-size:13px;color:#666;text-transform:uppercase}
+.bigsum{background:#fff;font-size:30px;font-weight:600;text-align:center;padding:8px;border-top:1px solid #ccc}
+.check .tools{display:flex;border-top:1px solid #ccc}
+.check .tools button{flex:1;background:none;border:none;border-right:1px solid #ddd;font-size:20px;color:#666;padding:10px;cursor:pointer}
+/* меню справа */
+.menu-side{display:flex;flex-direction:column;overflow:hidden;gap:8px}
+.menu-nav{display:flex;gap:8px;align-items:center}
+.menu-nav .nbtn{background:var(--dark-tile);border:none;color:#eee;font-size:20px;padding:12px 22px;cursor:pointer}
+.menu-body{flex:1;display:grid;grid-template-columns:280px 1fr;gap:8px;overflow:hidden}
+.cats{display:flex;flex-direction:column;gap:6px;overflow:auto}
+.cats .cat{background:var(--gray-tile);border:none;color:#fff;padding:22px 12px;font-size:15px;cursor:pointer;text-align:center}
+.cats .cat.on{background:#E8A33D;color:#402D05}
+.dishes{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px;align-content:start;overflow:auto}
+.dishes .dish{background:var(--tile);border:1px solid #B5B5B5;color:var(--ink);min-height:86px;padding:8px;font-size:14px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;text-align:center}
+.dishes .dish:hover{background:var(--tile2)}
+.dishes .dish small{color:#777;margin-top:4px}
+/* модальные окна в стиле iiko */
+.modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50}
+.imodal{background:#2E2F2F;box-shadow:0 8px 40px rgba(0,0,0,.6);min-width:480px;max-width:92vw;max-height:92vh;overflow:auto}
+.imodal .mtitle{color:#fff;text-align:center;font-size:19px;padding:16px}
+.imodal .msub{color:#ddd;text-align:center;padding:0 16px 10px;font-size:15px}
+.imodal .mbtns{display:flex;justify-content:center;gap:60px;padding:16px;border-top:1px solid #444}
+.imodal .mbtns button{background:none;border:none;color:#fff;font-size:19px;font-weight:600;cursor:pointer;padding:8px 20px}
+.imodal .mbtns button.acc{color:var(--sel)}
+/* нумпад */
+.numwrap{background:#fff;margin:0 16px 4px;padding:0}
+.numdisp{display:grid;grid-template-columns:1fr auto;background:#6B6B6B;color:#fff}
+.numdisp .nd{font-size:34px;padding:8px 20px;text-align:right;font-variant-numeric:tabular-nums}
+.numdisp .nu{background:#2E2F2F;font-size:22px;padding:14px 26px;display:flex;align-items:center}
+.numgrid{display:grid;grid-template-columns:repeat(5,110px);grid-auto-rows:74px}
+.numgrid button{background:#fff;border:1px solid #D5D5D5;font-size:26px;cursor:pointer;color:#222}
+.numgrid button.shade{background:var(--numpad-shade);font-size:20px}
+.numgrid button:active{background:var(--sel)}
+/* предоплата */
+.pp-tabs{display:flex;background:#fff}
+.pp-tabs .pt{flex:1;text-align:center;padding:18px 10px;font-size:16px;font-weight:600;color:#333;cursor:pointer;border:none;background:#fff}
+.pp-tabs .pt.on{background:var(--sel)}
+.pp-sel{color:#ddd;text-align:center;padding:10px;font-size:14px}
+.pp-sel b{color:var(--sel)}
+.paylist{color:#eee;padding:4px 24px;font-size:15px}
+.paylist .pl{display:flex;justify-content:space-between;background:#fff;color:#222;padding:10px 12px;margin:6px 0;align-items:center}
+.paylist .pl .x{color:#B33;cursor:pointer;font-size:18px;border:none;background:none;padding:0 4px}
+.mact{display:flex;gap:26px;justify-content:flex-end;padding:14px 22px;border-top:1px solid #444;align-items:center}
+.mact button{background:none;border:none;color:#bbb;font-size:18px;cursor:pointer;padding:6px 10px}
+.mact button.acc{color:#fff;font-weight:600}
+.mact button:disabled{color:#666;cursor:default}
+.paymeth{display:flex;flex-direction:column;gap:2px;padding:10px 24px}
+.paymeth button{background:#fff;border:none;padding:18px;font-size:17px;cursor:pointer}
+/* оплата заказа */
+.pay-wrap{display:grid;grid-template-columns:1fr 1fr;gap:10px;height:100%}
+.pay-left{background:var(--tile);color:var(--ink);overflow:auto}
+.pay-left .ph{padding:10px 14px;font-weight:600;font-size:18px;border-bottom:1px solid #ddd}
+.pay-left .itot{display:flex;justify-content:space-between;padding:8px 14px;font-size:15px;border-bottom:1px solid #eee}
+.pay-left .itot.big{font-size:19px;font-weight:600}
+.pay-right{display:flex;flex-direction:column;gap:8px;overflow:auto}
+.pr-due{display:flex;justify-content:space-between;color:#fff;font-size:22px;padding:10px 16px;background:#333}
+.methrow{display:flex;gap:2px}
+.methrow .mt{flex:1;background:#6E7B84;border:none;color:#fff;padding:14px 8px;font-size:13px;text-transform:uppercase;cursor:pointer;display:flex;flex-direction:column;gap:6px;align-items:center}
+.methrow .mt .ic{font-size:22px}
+.methrow .mt:hover{background:#7E8B94}
+.paybtn{background:var(--sel);border:none;font-size:22px;font-weight:600;padding:20px;cursor:pointer;margin-top:auto}
+.paybtn:disabled{background:#777;color:#aaa;cursor:default}
+/* закрытые заказы: даты */
+.daytabs{display:flex;background:#3A3B3B;margin:0 -10px;border-bottom:1px solid var(--dline)}
+.daytabs .dt{flex:1;text-align:center;padding:14px 4px;color:#ccc;cursor:pointer;border:none;background:none;font-size:15px}
+.daytabs .dt.on{background:#6E7B84;color:#fff}
+.daytabs .dt small{display:block;color:#aaa;font-size:11px}
+/* настройки/меню (служебные, стиль сохранён) */
+.setwrap{max-width:1100px;margin:0 auto;color:#eee}
+.setwrap h3{font-size:16px;text-transform:uppercase;color:#ccc;margin:18px 0 8px}
+.setwrap table{border-collapse:collapse;width:100%}
+.setwrap td,.setwrap th{background:#fff;color:#222;padding:6px 8px;border-bottom:2px solid var(--bg);font-size:14px}
+.setwrap th{background:#8A97A0;color:#fff;font-weight:400}
+.setwrap input,.setwrap select{width:100%;border:1px solid #ccc;font:inherit;padding:6px}
+.setwrap .muted{color:#aaa;font-size:13px}
+.lockbtn{background:none;border:2px solid #444;border-radius:4px;color:#333;font-size:20px;padding:4px 10px;cursor:pointer}
+@media(max-width:900px){.order-wrap{grid-template-columns:1fr}.pay-wrap{grid-template-columns:1fr}.home{grid-template-columns:repeat(2,1fr)}.card-grid{grid-template-columns:1fr}}
+#printArea{display:none}
+@media print{
+  body{background:#fff;overflow:visible}
+  #app{display:none}
+  #printArea{display:block;font:13px/1.5 Georgia,serif;color:#000;padding:10mm}
+  #printArea h1{font-size:20px;margin:0 0 2px}
+  #printArea table{width:100%;border-collapse:collapse;margin-top:10px}
+  #printArea th,#printArea td{border-bottom:1px solid #999;padding:5px 6px;text-align:left;color:#000}
+  #printArea .num{text-align:right}
+  #printArea .tot{font-weight:700}
+}
+</style>
+
+<div id="app">
+  <div class="tinybar"><span>Банкеты Любавы</span><span id="clock"></span><span class="r" id="userlbl"></span></div>
+  <div id="banner"></div>
+  <div class="screen" id="screen"></div>
+  <div class="botbar" id="botbar"></div>
+</div>
+<div id="modal"></div>
+<div id="printArea"></div>
+
+<script>
+"use strict";
+/* ================= helpers ================= */
+const $=(s,r)=>(r||document).querySelector(s);
+const uid=()=> (crypto.randomUUID?crypto.randomUUID():('id'+Date.now()+Math.random().toString(16).slice(2)));
+const fmt=n=>new Intl.NumberFormat('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n||0)+' р.';
+const fmt0=n=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2}).format(n||0)+' р.';
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const isoOf=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const ruDate=iso=>{if(!iso)return '';const[y,m,d]=iso.split('-');return d+'.'+m+'.'+y;};
+const ruDT=iso=>{if(!iso)return '';const d=new Date(iso);return ruDate(isoOf(d))+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');};
+const num=v=>{const n=parseFloat(String(v).replace(',','.').replace(/\s/g,''));return isNaN(n)?0:n;};
+const MONTHS_R=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+const MONTHS_N=['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+/* способы оплаты как в iikoFront */
+const METHODS={
+  qr:{name:'QR код',group:'Банковские карты'},
+  otkr:{name:'Открытие',group:'Банковские карты'},
+  sber:{name:'Сбербанк',group:'Банковские карты'},
+  acq:{name:'Эквайринг',group:'Банковские карты'},
+  cash:{name:'Наличные',group:'Оплата наличными'},
+  account:{name:'Безналичный расчет',group:'Безналичный расчет'}
+};
+const mName=k=>(METHODS[k]||{name:k}).name;
+const mGroup=k=>(METHODS[k]||{group:''}).group;
+setInterval(()=>{const d=new Date();const c=$('#clock');if(c)c.textContent=ruDate(todayISO())+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');},1000);
+
+/* ================= db-адаптер ================= */
+let db=null;
+function unwrapDoc(s){if(s==null)return null;if(typeof s.data==='function'){try{return s.data()||null;}catch(e){return null;}}
+  if(s.data!==undefined&&typeof s.data==='object')return s.data;if(s.exists===false)return null;return typeof s==='object'?s:null;}
+function unwrapCol(s){if(!s)return[];let a=Array.isArray(s)?s:(s.docs||s.documents||[]);
+  return a.map(d=>{const x=unwrapDoc(d);return x?{id:d.id||x.id,data:x}:null;}).filter(Boolean);}
+async function dbGetDoc(p){if(!db)return null;try{return unwrapDoc(await db.doc(p).get());}catch(e){return null;}}
+async function dbSetDoc(p,d){if(!db)return false;try{await db.doc(p).set(d);return true;}catch(e){alert('Не удалось сохранить. Проверьте связь.');return false;}}
+async function dbGetCol(p){if(!db)return[];try{return unwrapCol(await db.collection(p).get());}catch(e){return[];}}
+
+/* ================= состояние ================= */
+const S={
+  screen:'home', rms:[],fronts:[],conceptions:[],stores:[],menus:{},banquets:[],shifts:[],
+  listDate:todayISO(), listFilter:'act', closedDate:todayISO(),
+  editingId:null, cat:null, selItem:null, frontId:null,
+  employees:[], user:null
+};
+/* мгновенная выгрузка события в iiko (оплата, закрытие смены) — работает при запуске через свой сервер */
+function pushIiko(kind,extra){
+  try{fetch('/api/push',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(Object.assign({kind:kind},extra||{}))}).catch(()=>{});}catch(e){}
+}
+const pinRequired=()=>S.employees.some(e=>e.pin);
+try{S.frontId=localStorage.getItem('bq_front')||null;}catch(e){}
+const frontById=id=>S.fronts.find(f=>f.id===id);
+const rmsById=id=>S.rms.find(r=>r.id===id);
+const curFront=()=>frontById(S.frontId)||S.fronts[0]||null;
+function bqFront(b){return frontById(b.frontId)||null;}
+function bqRms(b){const f=bqFront(b);return f?rmsById(f.rmsId):null;}
+function openShiftFor(fid){return S.shifts.find(x=>x.data.frontId===fid&&!x.data.closedAt);}
+function shiftNum(fid){return S.shifts.filter(x=>x.data.frontId===fid).length;}
+
+/* ================= загрузка ================= */
+(async function boot(){
+  render();
+  try{db=await claude.use('db');}catch(e){db=null;}
+  if(!db){$('#banner').innerHTML='<div style="background:#7a5a1e;color:#ffd;padding:8px 14px;font-size:14px">Нет соединения с базой — откройте страницу через сервер или приложение Claude.</div>';return;}
+  const st=await dbGetDoc('config/structure')||{};
+  S.rms=st.rms||[];S.fronts=st.fronts||[];S.conceptions=st.conceptions||[];S.stores=st.stores||[];
+  const emp=await dbGetDoc('config/employees')||{};
+  S.employees=(emp.items||[]).filter(e=>e&&e.name);
+  S.banquets=await dbGetCol('banquets');
+  S.shifts=await dbGetCol('shifts');
+  if(!S.frontId&&S.fronts.length)S.frontId=S.fronts[0].id;
+  render();
+  try{
+    db.collection('banquets').onSnapshot(s=>{S.banquets=unwrapCol(s);if(['list','closed','home'].includes(S.screen))render();});
+    db.collection('shifts').onSnapshot(s=>{S.shifts=unwrapCol(s);if(['home'].includes(S.screen))render();});
+  }catch(e){setInterval(async()=>{S.banquets=await dbGetCol('banquets');S.shifts=await dbGetCol('shifts');if(['list','closed','home'].includes(S.screen))render();},15000);}
+})();
+async function loadMenu(rmsId){if(!S.menus[rmsId])S.menus[rmsId]=(await dbGetDoc('menus/'+rmsId))||{items:[]};return S.menus[rmsId];}
+function saveStructure(){dbSetDoc('config/structure',{rms:S.rms,fronts:S.fronts,conceptions:S.conceptions,stores:S.stores});}
+
+/* ================= расчёты ================= */
+function bqTotals(b){
+  const sub=(b.items||[]).reduce((s,i)=>s+num(i.price)*num(i.qty),0);
+  const service=sub*num(b.servicePct)/100;
+  const discount=sub*num(b.discountPct)/100+num(b.discountRub);
+  const total=Math.max(0,Math.round((sub+service-discount)*100)/100);
+  const paid=(b.payments||[]).reduce((s,p)=>s+num(p.amount),0);
+  return {sub,service,discount,total,paid,rest:Math.round((total-paid)*100)/100};
+}
+function curBq(){const x=S.banquets.find(x=>x.id===S.editingId);return x?x.data:null;}
+let saveTimer=null;
+function saveBq(b,now){b.updatedAt=new Date().toISOString();clearTimeout(saveTimer);
+  if(now){dbSetDoc('banquets/'+b.id,b);}else saveTimer=setTimeout(()=>dbSetDoc('banquets/'+b.id,b),400);}
+
+/* ================= каркас ================= */
+function render(){
+  const scr=$('#screen'),bar=$('#botbar');
+  if(pinRequired()&&!S.user){renderLock(scr,bar);return;}
+  $('#userlbl').textContent=(S.user?S.user.name+' · ':'')+(curFront()? (rmsById(curFront().rmsId)||{}).name+' / '+curFront().name:'');
+  if(S.screen==='home')renderHome(scr,bar);
+  else if(S.screen==='list')renderList(scr,bar);
+  else if(S.screen==='card')renderCard(scr,bar);
+  else if(S.screen==='order')renderOrder(scr,bar);
+  else if(S.screen==='pay')renderPay(scr,bar);
+  else if(S.screen==='closed')renderClosed(scr,bar);
+  else if(S.screen==='settings')renderSettings(scr,bar);
+}
+function go(s){S.screen=s;closeModal();render();}
+function botbar(bar,items){
+  bar.innerHTML=items.map(i=>`<button class="bb ${i.cls||''}" data-a="${i.a}" ${i.dis?'disabled':''}><span class="ic">${i.ic||''}</span>${i.t}</button>`).join('');
+  bar.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>bar._acts[b.dataset.a]&&bar._acts[b.dataset.a]());
+}
+
+/* ================= модалки ================= */
+function closeModal(){$('#modal').innerHTML='';}
+function modal(html){$('#modal').innerHTML=`<div class="modal-back">${html}</div>`;}
+function iConfirm(text,onOk,okT,cancelT){
+  modal(`<div class="imodal"><div class="mtitle">Предупреждение</div><div class="msub" style="padding:10px 40px 20px;font-size:17px">${esc(text)}</div>
+  <div class="mbtns"><button class="acc" id="m_ok">${okT||'ОК'}</button><button id="m_no">${cancelT||'Отмена'}</button></div></div>`);
+  $('#m_ok').onclick=()=>{closeModal();onOk&&onOk();};
+  $('#m_no').onclick=closeModal;
+}
+/* нумпад: title, начальное значение, unit, cb(value) */
+function numpad(title,init,unit,cb,extras){
+  let val=String(init??'');
+  const ex=extras||['0,25','0,33','0,5','0,75','1,25','1,33','1,5','1,75'];
+  modal(`<div class="imodal"><div class="mtitle">${esc(title.t||'КОЛИЧЕСТВО')}</div>
+    ${title.sub?`<div class="msub">${esc(title.sub)}</div>`:''}
+    <div class="numwrap"><div class="numdisp"><div class="nd" id="np_v"></div><div class="nu">${esc(unit||'')}</div></div>
+    <div class="numgrid">
+      ${['1','2','3'].map(d=>`<button data-d="${d}">${d}</button>`).join('')}<button class="shade" data-d="${ex[0]}">${ex[0]}</button><button class="shade" data-d="${ex[1]}">${ex[1]}</button>
+      ${['4','5','6'].map(d=>`<button data-d="${d}">${d}</button>`).join('')}<button class="shade" data-d="${ex[2]}">${ex[2]}</button><button class="shade" data-d="${ex[3]}">${ex[3]}</button>
+      ${['7','8','9'].map(d=>`<button data-d="${d}">${d}</button>`).join('')}<button class="shade" data-d="${ex[4]}">${ex[4]}</button><button class="shade" data-d="${ex[5]}">${ex[5]}</button>
+      <button data-d=",">,</button><button data-d="0">0</button><button data-d="X">✕</button><button class="shade" data-d="${ex[6]}">${ex[6]}</button><button class="shade" data-d="${ex[7]}">${ex[7]}</button>
+    </div></div>
+    <div class="mbtns"><button class="acc" id="np_ok">ОК</button><button id="np_no">Отмена</button></div></div>`);
+  const disp=()=>{$('#np_v').textContent=val||'0';};disp();
+  $('#modal').querySelectorAll('[data-d]').forEach(b=>b.onclick=()=>{
+    const d=b.dataset.d;
+    if(d==='X'){val='';}
+    else if(/^[0-9,]$/.test(d)){val=(val==='0'?'':val)+d;}
+    else if(d.startsWith('+')){val=String(num(val)+num(d));}
+    else{val=d;} // пресеты 0,25 и т.п.
+    disp();
+  });
+  $('#np_ok').onclick=()=>{const v=num(val);closeModal();cb(v);};
+  $('#np_no').onclick=closeModal;
+}
+function moneyPad(title,cb){
+  numpad({t:title},'', 'р.',cb,['+1','+5','+10','+50','+100','+500','+1000','+5000']);
+}
+
+/* ================= ЭКРАН БЛОКИРОВКИ: вход по PIN, как в iikoFront ================= */
+let pinBuf='';
+function renderLock(scr,bar){
+  bar.innerHTML='';
+  $('#userlbl').textContent='';
+  scr.innerHTML=`
+  <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:18px">
+    <div style="font-size:22px;color:#ddd">Введите PIN-код</div>
+    <div id="pindots" style="display:flex;gap:14px;height:22px">
+      ${[0,1,2,3].map(i=>`<span data-dot="${i}" style="width:16px;height:16px;border-radius:50%;border:2px solid #999;display:inline-block"></span>`).join('')}
+    </div>
+    <div id="pinmsg" style="color:var(--red);font-size:14px;height:18px"></div>
+    <div style="display:grid;grid-template-columns:repeat(3,110px);grid-auto-rows:84px;gap:2px;background:#B5B5B5;border:1px solid #B5B5B5">
+      ${[1,2,3,4,5,6,7,8,9].map(d=>`<button class="wtile" data-p="${d}" style="font-size:28px;border:none;border-radius:0">${d}</button>`).join('')}
+      <button class="wtile" style="border:none;border-radius:0;background:#E9E9E9"></button>
+      <button class="wtile" data-p="0" style="font-size:28px;border:none;border-radius:0">0</button>
+      <button class="wtile" data-p="X" style="font-size:24px;border:none;border-radius:0">✕</button>
+    </div>
+    <div style="color:#888;font-size:13px">${esc(curFront()?((rmsById(curFront().rmsId)||{}).name+' / '+curFront().name):'')}</div>
+  </div>`;
+  const dots=()=>{scr.querySelectorAll('[data-dot]').forEach((s,i)=>{s.style.background=i<pinBuf.length?'#E3E982':'none';});};
+  scr.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{
+    const d=b.dataset.p;
+    if(d==='X'){pinBuf='';dots();return;}
+    if(pinBuf.length>=4)return;
+    pinBuf+=d;dots();
+    if(pinBuf.length===4){
+      const emp=S.employees.find(e=>e.pin===pinBuf);
+      setTimeout(()=>{
+        if(emp){S.user=emp;pinBuf='';render();}
+        else{pinBuf='';dots();$('#pinmsg').textContent='Неверный PIN-код';setTimeout(()=>{const m=$('#pinmsg');if(m)m.textContent='';},1500);}
+      },150);
+    }
+  });
+}
+/* ================= ГЛАВНЫЙ ЭКРАН ================= */
+function renderHome(scr,bar){
+  const f=curFront();
+  const sh=f?openShiftFor(f.id):null;
+  scr.innerHTML=`
+  <div class="home">
+    <div class="hcol">
+      <div class="hsec"><div class="usertile" style="background:var(--purple)">
+        <div class="un">${esc(S.user?S.user.name:(f?f.name:'Фронт не выбран'))}</div>
+        <div style="font-size:13px">${sh?'Смена открыта<br>'+ruDT(sh.data.openedAt):'Смена закрыта'}</div></div>
+      <div class="hbody">
+        ${pinRequired()?'<button class="wtile" id="h_lock">Закрыть личную смену</button>':''}
+        <button class="wtile" id="h_front">Сменить фронт</button>
+        <button class="wtile" id="h_settings">Настройки (меню, структура)</button>
+      </div></div>
+      <div class="hsec"><div class="hhead" style="background:var(--blue)">ДОКУМЕНТЫ</div>
+      <div class="hbody"><button class="wtile" id="h_closed">Закрытые заказы</button></div></div>
+    </div>
+    <div class="hcol"><div class="hsec">
+      <div class="hhead" style="background:#5B8DB8">ГОСТИ</div>
+      <div class="hbody"><button class="wtile" id="h_bq">Банкеты и резервы</button></div>
+    </div></div>
+    <div class="hcol"><div class="hsec">
+      <div class="hhead" style="background:var(--green)">СЕРВИС</div>
+      <div class="hbody"><button class="wtile" id="h_print" ${'' }>Печать банкетов на сегодня</button></div>
+    </div></div>
+    <div class="hcol"><div class="hsec">
+      <div class="hhead" style="background:var(--teal);text-align:center">КАССА</div>
+      <div class="kassa-info" style="background:var(--teal)">
+        ${f?esc((rmsById(f.rmsId)||{}).name+' · '+f.name):''}<br>
+        ${sh?`Смена №${sh.data.num||''} открыта ${ruDT(sh.data.openedAt)}`:'Кассовая смена закрыта'}
+      </div>
+      <div class="kassa-grid">
+        ${sh?`<button class="wtile" id="k_close">Закрыть кассовую смену</button>`:`<button class="wtile" id="k_open">Открыть кассовую смену</button>`}
+        <button class="wtile" id="k_money" ${sh?'':'disabled'}>Внести деньги</button>
+        <button class="wtile" id="h_bq2">Открытые банкеты</button>
+        <button class="wtile" id="h_closed2">Закрытые заказы</button>
+      </div>
+    </div></div>
+  </div>`;
+  const hl=$('#h_lock');if(hl)hl.onclick=()=>{S.user=null;render();};
+  $('#h_front').onclick=pickFront;
+  $('#h_settings').onclick=()=>go('settings');
+  $('#h_closed').onclick=()=>go('closed');
+  $('#h_closed2').onclick=()=>go('closed');
+  $('#h_bq').onclick=()=>go('list');
+  $('#h_bq2').onclick=()=>go('list');
+  $('#h_print').onclick=()=>printDay();
+  const ko=$('#k_open');if(ko)ko.onclick=async()=>{
+    const shd={id:uid(),frontId:f.id,num:shiftNum(f.id)+1,openedAt:new Date().toISOString(),closedAt:null};
+    S.shifts.push({id:shd.id,data:shd});await dbSetDoc('shifts/'+shd.id,shd);render();
+  };
+  const kc=$('#k_close');if(kc)kc.onclick=()=>closeShift(sh);
+  const km=$('#k_money');if(km)km.onclick=()=>go('list');
+  botbar(bar,[{a:'lock',t:pinRequired()?'Блокировка':'Сменить фронт',ic:'🔒'},{a:'off',t:'Обновить',ic:'⟳',cls:'right'}]);
+  bar._acts={lock:pinRequired()?()=>{S.user=null;render();}:pickFront,off:()=>location.reload()};
+}
+function pickFront(){
+  modal(`<div class="imodal"><div class="mtitle">Выбор фронта (терминала)</div>
+    <div style="display:flex;flex-direction:column;gap:2px;padding:0 20px 10px;max-height:60vh;overflow:auto">
+    ${S.rms.map(r=>S.fronts.filter(f=>f.rmsId===r.id).map(f=>
+      `<button class="wtile ${f.id===S.frontId?'on':''}" data-f="${f.id}" style="padding:16px">${esc(r.name)} / ${esc(f.name)}</button>`).join('')).join('')}
+    </div><div class="mbtns"><button id="m_no">Отмена</button></div></div>`);
+  $('#modal').querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{
+    S.frontId=b.dataset.f;try{localStorage.setItem('bq_front',S.frontId);}catch(e){}
+    closeModal();render();
+  });
+  $('#m_no').onclick=closeModal;
+}
+function closeShift(sh){
+  const from=sh.data.openedAt,to=new Date().toISOString();
+  const closed=S.banquets.filter(b=>b.data.status==='closed'&&b.data.shiftId===sh.id);
+  const pays=[];
+  S.banquets.forEach(b=>(b.data.payments||[]).forEach(p=>{if(p.shiftId===sh.id)pays.push(p);}));
+  const by={};pays.forEach(p=>by[p.method]=(by[p.method]||0)+num(p.amount));
+  const sum=closed.reduce((s,b)=>s+bqTotals(b.data).total,0);
+  const lines=Object.entries(by).map(([k,s])=>`${mName(k)}: ${fmt0(s)}`).join('<br>')||'оплат не было';
+  modal(`<div class="imodal"><div class="mtitle">Закрытие кассовой смены №${sh.data.num||''}</div>
+    <div class="msub" style="text-align:left;padding:10px 40px">
+    Открыта: ${ruDT(from)}<br>Закрыто банкетов: ${closed.length} на ${fmt0(sum)}<br>
+    Оплат за смену: ${pays.length}<br>${lines}</div>
+    <div class="mbtns"><button class="acc" id="m_ok">Закрыть смену</button><button id="m_no">Отмена</button></div></div>`);
+  $('#m_ok').onclick=async()=>{sh.data.closedAt=to;sh.data.closedBy=S.user?S.user.name:'';
+    await dbSetDoc('shifts/'+sh.id,sh.data);
+    pushIiko('shift_close',{shiftId:sh.id}); // сразу акты реализации и ордера в iiko, как в iikoFront
+    closeModal();render();};
+  $('#m_no').onclick=closeModal;
+}
+
+/* ================= СПИСОК БАНКЕТОВ ================= */
+function bqState(b){
+  if(b.status==='closed')return 'done';
+  if(b.status==='cancelled')return 'off';
+  const now=new Date();
+  const dt=new Date(b.date+'T'+(b.time||'23:59'));
+  if(b.started)return 'started';
+  if(b.date<=todayISO()&&dt<now)return 'late';
+  return 'act';
+}
+function lateText(b){
+  const dt=new Date(b.date+'T'+(b.time||'00:00'));const mins=Math.floor((Date.now()-dt)/60000);
+  const h=Math.floor(mins/60),m=mins%60;
+  return 'Опаздывают на '+(h?h+' ч. ':'')+m+' мин.!';
+}
+function renderList(scr,bar){
+  const d=S.listDate;
+  const all=S.banquets.filter(x=>x.data.date===d);
+  const groups={act:[],started:[],late:[],done:[],off:[]};
+  all.forEach(x=>{const st=bqState(x.data);(groups[st]||groups.act).push(x);});
+  const F=S.listFilter;
+  let rows=F==='all'?all:(F==='act'?[...groups.act,...groups.late,...groups.started]:groups[F]||[]);
+  rows=rows.sort((a,b)=>(a.data.time||'').localeCompare(b.data.time||''));
+  const dd=new Date(d+'T00:00:00');
+  scr.innerHTML=`
+  <div class="listtop">
+    <button class="icbtn on"><span class="ic">☰</span>ВСЕ ЗАКАЗЫ</button>
+    <button class="icbtn"><span class="ic">🍽</span>БАНКЕТЫ</button>
+    <div class="datenav">
+      <button class="arr" id="dprev">‹</button>
+      <div><b>${dd.getDate()} ${MONTHS_R[dd.getMonth()]} ${dd.getFullYear()}</b><small>${d===todayISO()?'(Сегодня)':''}</small></div>
+      <button class="arr" id="dnext">›</button>
+    </div>
+    <button class="icbtn" id="dcal"><span class="ic">📅</span>ДАТА</button>
+  </div>
+  <div class="statchips">
+    <button class="sc ${F==='act'?'on':''}" data-f="act">Действует <b>${groups.act.length+groups.late.length+groups.started.length}</b></button>
+    <button class="sc ${F==='started'?'on':''}" data-f="started">Начался <b>${groups.started.length}</b></button>
+    <button class="sc ${F==='late'?'on':''}" data-f="late">Опаздывают <b>${groups.late.length}</b></button>
+    <button class="sc dark ${F==='done'?'on':''}" data-f="done">Проведен <b>${groups.done.length}</b></button>
+    <button class="sc dark ${F==='off'?'on':''}" data-f="off">Снят <b>${groups.off.length}</b></button>
+    <button class="sc dark ${F==='all'?'on':''}" data-f="all">Все <b>${all.length}</b></button>
+  </div>
+  <table class="ilist"><thead><tr><th style="width:80px">№ Заказа</th><th style="width:170px">Статус</th><th style="width:110px">Время</th>
+  <th>Зал (фронт)</th><th style="width:80px">Гостей</th><th>Клиент</th><th style="width:130px">Сумма</th><th>Коммент.</th></tr></thead>
+  <tbody>${rows.length?rows.map(x=>{const b=x.data,t=bqTotals(b),st=bqState(b);
+    const stTd=st==='late'?`<td class="stat-late">${lateText(b)}</td>`
+      :st==='started'?`<td class="stat-ok">Начался</td>`
+      :st==='done'?`<td class="stat-neu">Проведен</td>`
+      :st==='off'?`<td class="stat-neu">Снят</td>`
+      :`<td class="stat-neu" style="color:#2A7">Действует</td>`;
+    return `<tr data-o="${x.id}"><td class="cnt">${esc(b.num||'')}</td>${stTd}
+    <td class="cnt"><b>${esc(b.time||'—')}</b><br><small style="color:#888">${d===todayISO()?'Сегодня':''}</small></td>
+    <td>${esc((bqFront(b)||{}).name||'—')}${b.tableNum?': '+esc(b.tableNum):''}</td>
+    <td class="cnt">${esc(b.client&&b.client.guests||'')}</td>
+    <td>${esc(b.client&&b.client.name||'')}${b.client&&b.client.phone?'<br><small>т. '+esc(b.client.phone)+'</small>':''}</td>
+    <td style="text-align:right">${fmt0(t.total)}${t.paid?'<br><small style="color:#2A7">опл. '+fmt0(t.paid)+'</small>':''}</td>
+    <td>${esc(b.comment||'')}</td></tr>`;}).join('')
+    :`<tr><td colspan="8" style="text-align:center;color:#999;padding:30px">Банкетов на эту дату нет</td></tr>`}</tbody></table>`;
+  const shiftDate=dl=>{const nd=new Date(d+'T00:00:00');nd.setDate(nd.getDate()+dl);S.listDate=isoOf(nd);render();};
+  $('#dprev').onclick=()=>shiftDate(-1);
+  $('#dnext').onclick=()=>shiftDate(1);
+  $('#dcal').onclick=calModal;
+  scr.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{S.listFilter=b.dataset.f;render();});
+  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'},{a:'new',t:'Новый банкет',ic:'🍽',cls:'right accent'}]);
+  bar._acts={back:()=>go('home'),new:newBanquet};
+}
+function calModal(){
+  const cur=new Date(S.listDate+'T00:00:00');let y=cur.getFullYear(),m=cur.getMonth();
+  const draw=()=>{
+    const start=((new Date(y,m,1)).getDay()+6)%7,dim=new Date(y,m+1,0).getDate();
+    let cells='';['пн','вт','ср','чт','пт','сб','вс'].forEach(x=>cells+=`<div style="color:#999;text-align:center;font-size:12px;padding:4px">${x}</div>`);
+    for(let i=0;i<start;i++)cells+='<div></div>';
+    for(let dn=1;dn<=dim;dn++){const iso=isoOf(new Date(y,m,dn));
+      const n=S.banquets.filter(b=>b.data.date===iso&&b.data.status!=='cancelled').length;
+      cells+=`<button class="wtile ${iso===S.listDate?'on':''}" data-dt="${iso}" style="padding:10px 4px">${dn}${n?`<br><small style="color:#C60">●${n}</small>`:''}</button>`;}
+    modal(`<div class="imodal"><div class="mtitle">
+      <button class="arr" id="c_p" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer">‹</button>
+      ${MONTHS_N[m]} ${y}
+      <button class="arr" id="c_n" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer">›</button></div>
+      <div style="display:grid;grid-template-columns:repeat(7,72px);gap:4px;padding:0 20px 14px">${cells}</div>
+      <div class="mbtns"><button id="m_no">Отмена</button></div></div>`);
+    $('#c_p').onclick=()=>{m--;if(m<0){m=11;y--;}draw();};
+    $('#c_n').onclick=()=>{m++;if(m>11){m=0;y++;}draw();};
+    $('#m_no').onclick=closeModal;
+    $('#modal').querySelectorAll('[data-dt]').forEach(b=>b.onclick=()=>{S.listDate=b.dataset.dt;closeModal();render();});
+  };
+  draw();
+}
+async function newBanquet(){
+  if(!S.fronts.length){alert('Структура не загружена');return;}
+  const f=curFront();
+  const maxNum=S.banquets.reduce((m,x)=>Math.max(m,num(x.data.num)),4100);
+  const b={id:uid(),num:maxNum+1,date:S.listDate,time:'19:00',durationH:'03:00',frontId:f?f.id:S.fronts[0].id,tableNum:'',
+    client:{name:'',surname:'',phone:'+7',guests:'2'},comment:'',eventType:'',
+    items:[],payments:[],servicePct:0,discountPct:0,discountRub:0,
+    status:'active',started:false,iikoStatus:null,shiftId:null,createdAt:new Date().toISOString()};
+  S.banquets.push({id:b.id,data:b});
+  await dbSetDoc('banquets/'+b.id,b);
+  S.editingId=b.id;go('card');
+}
+
+/* ================= КАРТОЧКА БАНКЕТА ================= */
+function renderCard(scr,bar){
+  const b=curBq();if(!b){go('list');return;}
+  const locked=b.status!=='active';
+  $('#screen').scrollTop=0;
+  const fOpts=S.fronts.map(f=>{const r=rmsById(f.rmsId);
+    return `<option value="${f.id}" ${f.id===b.frontId?'selected':''}>${esc((r?r.name:'?')+' / '+f.name)}</option>`;}).join('');
+  scr.innerHTML=`
+  <div class="tophead" style="margin:-10px -10px 0">
+    <div><div class="t1">Банкет № ${esc(b.num||'')}</div>
+    <div class="t2">${esc((bqFront(b)||{}).name||'')}, ${esc(b.time||'')} (${ruDate(b.date)})</div></div>
+    <div class="spacer"></div>
+    <div style="font-size:19px;color:#555">Статус: <b style="color:#111">${b.status==='closed'?'Проведен':b.status==='cancelled'?'Снят':b.started?'Начался':'Новый'}</b></div>
+  </div>
+  <div class="card-grid">
+    <div class="fgroup"><div class="gt">КЛИЕНТ</div>
+      <div class="frow"><div class="fl">Имя<br>Отчество</div><div class="fv ${b.client.name?'':'req'}"><input id="c_name" value="${esc(b.client.name)}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Фамилия</div><div class="fv"><input id="c_surname" value="${esc(b.client.surname||'')}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Телефон</div><div class="fv ${b.client.phone&&b.client.phone!=='+7'?'':'req'}"><input id="c_phone" value="${esc(b.client.phone||'+7')}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Прочее</div><div class="fv"><input id="c_other" value="${esc(b.client.other||'')}" ${locked?'disabled':''}></div></div>
+    </div>
+    <div class="fgroup"><div class="gt">БАНКЕТ</div>
+      <div class="frow"><div class="fl">Дата</div><div class="fv"><input type="date" id="b_date" value="${esc(b.date)}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Время</div><div class="fv"><input type="time" id="b_time" value="${esc(b.time)}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Длительность</div><div class="fv"><input id="b_dur" value="${esc(b.durationH||'03:00')}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Гостей</div><div class="fv"><input id="b_guests" inputmode="numeric" value="${esc(b.client.guests||'')}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Залы<br>Столы</div><div class="fv ${b.frontId?'':'req'}" style="display:grid;grid-template-columns:1fr 90px">
+        <select id="b_front" ${locked?'disabled':''}>${fOpts}</select>
+        <input id="b_table" placeholder="стол" value="${esc(b.tableNum||'')}" ${locked?'disabled':''} style="border-left:1px solid #ddd"></div></div>
+      <div class="frow"><div class="fl">Коммент.</div><div class="fv"><input id="b_comment" value="${esc(b.comment||'')}" ${locked?'disabled':''}></div></div>
+      <div class="frow"><div class="fl">Тип события</div><div class="fv"><input id="b_event" value="${esc(b.eventType||'')}" ${locked?'disabled':''}></div></div>
+      <div class="card-actions">
+        <div class="row2">
+          <button class="wtile ${b.started?'on':''}" id="b_start" ${locked?'disabled':''}>${b.started?'Банкет идёт':'Банкет начался'}</button>
+          ${b.status==='cancelled'?`<button class="wtile" id="b_restore">Вернуть в работу</button>`
+           :`<button class="wtile" id="b_cancel" ${b.status==='closed'?'disabled':''}>Отменить банкет</button>`}
+        </div>
+        ${b.status==='closed'?`<button class="wtile" id="b_reopen">Переоткрыть (проведён${b.iikoStatus==='uploaded'?', акт в iiko создан':''})</button>`:''}
+      </div>
+    </div>
+  </div>`;
+  const bind=(id,fn)=>{const e=$(id);if(e)e.onchange=ev=>{fn(ev.target.value);saveBq(b);};};
+  bind('#c_name',v=>b.client.name=v.trim());bind('#c_surname',v=>b.client.surname=v.trim());
+  bind('#c_phone',v=>b.client.phone=v.trim());bind('#c_other',v=>b.client.other=v.trim());
+  bind('#b_date',v=>b.date=v);bind('#b_time',v=>b.time=v);bind('#b_dur',v=>b.durationH=v);
+  bind('#b_guests',v=>b.client.guests=v.trim());bind('#b_table',v=>b.tableNum=v.trim());
+  bind('#b_comment',v=>b.comment=v.trim());bind('#b_event',v=>b.eventType=v.trim());
+  const bf=$('#b_front');if(bf)bf.onchange=e=>{b.frontId=e.target.value;saveBq(b);render();};
+  const bs=$('#b_start');if(bs)bs.onclick=()=>{b.started=!b.started;saveBq(b,true);render();};
+  const bc=$('#b_cancel');if(bc)bc.onclick=()=>iConfirm('Снять банкет?',()=>{b.status='cancelled';saveBq(b,true);go('list');});
+  const br=$('#b_restore');if(br)br.onclick=()=>{b.status='active';saveBq(b,true);render();};
+  const bo=$('#b_reopen');if(bo)bo.onclick=()=>iConfirm(b.iikoStatus==='uploaded'?'По банкету уже создан акт в iiko. Переоткрыть?':'Переоткрыть банкет?',
+    ()=>{b.status='active';b.iikoStatus=null;b.closedAt=null;b.shiftId=null;saveBq(b,true);render();});
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'},{a:'order',t:'Заказ',ic:'🍽',cls:'accent'},
+    {a:'save',t:'Сохранить',cls:'right accent'},{a:'cancel',t:'Отмена'}]);
+  bar._acts={back:()=>go('list'),order:()=>go('order'),save:()=>{saveBq(b,true);go('list');},cancel:()=>go('list')};
+}
+
+/* ================= ЭКРАН ЗАКАЗА ================= */
+async function renderOrder(scr,bar){
+  const b=curBq();if(!b){go('list');return;}
+  const rms=bqRms(b);
+  const menu=rms?await loadMenu(rms.id):{items:[]};
+  const locked=b.status!=='active';
+  const cats=[...new Set(menu.items.map(i=>i.category||'Прочее'))];
+  if(!S.cat||!cats.includes(S.cat))S.cat=cats[0]||null;
+  const t=bqTotals(b);
+  scr.innerHTML=`
+  <div class="order-wrap">
+    <div class="check">
+      <div class="chead"><span>${esc(b.time||'')}</span><span>🧾 ${esc(b.num||'')}</span><span>🪑 ${esc(b.tableNum||'—')}</span><span>👤 ${esc(b.client.guests||'')}</span>
+        <span style="margin-left:auto">${esc(b.client.name||'')}</span></div>
+      <div class="gtitle">Гость 1</div>
+      <div class="items" id="ci_list"></div>
+      <div class="totals">
+        <div class="disc-panel">
+          <div class="dp1" id="d_open">
+            <small>Скидка:</small><b id="d_pct"></b>
+            <small style="margin-top:4px">Надбавка:</small><b id="d_srv"></b>
+          </div>
+          <div>
+            <div class="sumline"><span>Подытог</span><span id="t_sub"></span></div>
+            <div class="sumline"><span>Предоплата</span><span id="t_paid"></span></div>
+            <div class="bigsum" id="t_due"></div>
+          </div>
+        </div>
+        <div class="tools">
+          <button id="tl_plus" title="Добавить">＋</button>
+          <button id="tl_minus" title="Удалить позицию">－</button>
+          <button id="tl_123" title="Количество">123</button>
+          <button id="tl_del" title="Удалить">✕</button>
+        </div>
+      </div>
+    </div>
+    <div class="menu-side">
+      <div class="menu-nav">
+        <button class="nbtn" id="mn_back">←</button>
+        <button class="nbtn" id="mn_home">⌂</button>
+        <div style="color:#ccc;font-size:14px;margin-left:auto">${esc(rms?rms.name:'')} · меню из iiko</div>
+      </div>
+      <div class="menu-body">
+        <div class="cats">${cats.map(c=>`<button class="cat ${c===S.cat?'on':''}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+        <div class="dishes" id="dishes"></div>
+      </div>
+    </div>
+  </div>`;
+  function refreshCheck(){
+    const t2=bqTotals(b);
+    $('#d_pct').textContent=(b.discountPct||0)+'%'+(b.discountRub?(' +'+fmt0(b.discountRub)):'');
+    $('#d_srv').textContent=(b.servicePct||0)+'%';
+    $('#t_sub').textContent=fmt(t2.total);
+    $('#t_paid').textContent=fmt(t2.paid);
+    $('#t_due').textContent=fmt(Math.max(0,t2.rest));
+    const list=$('#ci_list');
+    list.innerHTML=b.items.length?b.items.map(i=>`<div class="ci ${S.selItem===i.id?'on':''}" data-i="${i.id}">
+      <span class="qty">${esc(i.qty)}</span><span>${esc(i.name)}</span><span class="sum">${fmt(num(i.price)*num(i.qty))}</span></div>`).join('')
+      :'<div style="color:#999;text-align:center;padding:30px">Выберите блюда из меню справа</div>';
+    list.querySelectorAll('[data-i]').forEach(el=>el.onclick=()=>{S.selItem=el.dataset.i;refreshCheck();});
+  }
+  refreshCheck();
+  const drawDishes=()=>{
+    const its=menu.items.filter(i=>(i.category||'Прочее')===S.cat);
+    const de=$('#dishes');
+    de.innerHTML=its.map(i=>`<button class="dish" data-d="${i.id}" ${locked?'disabled':''}>${esc(i.name)}<small>${i.freePrice||!num(i.price)?'свободная цена':fmt0(i.price)}</small></button>`).join('');
+    de.querySelectorAll('[data-d]').forEach(el=>el.onclick=()=>{
+      const it=menu.items.find(i=>i.id===el.dataset.d);
+      const addIt=(price)=>{
+        const ex=b.items.find(x=>x.name===it.name&&num(x.price)===num(price));
+        if(ex){ex.qty=num(ex.qty)+1;S.selItem=ex.id;}else{const ni={id:uid(),name:it.name,price:price,qty:1,productId:it.productId||null};b.items.push(ni);S.selItem=ni.id;}
+        saveBq(b);refreshCheck();
+      };
+      if(it.freePrice||!num(it.price)){ // свободная цена — как в iikoFront, спросить цену
+        moneyPad('ЦЕНА: '+it.name,v=>{if(v>0)addIt(v);});
+      }else addIt(it.price);
+    });
+  };
+  drawDishes();
+  scr.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{S.cat=el.dataset.c;
+    scr.querySelectorAll('.cat').forEach(x=>x.classList.toggle('on',x===el));drawDishes();});
+  $('#mn_back').onclick=()=>go('card');
+  $('#mn_home').onclick=()=>go('home');
+  const sel=()=>b.items.find(i=>i.id===S.selItem);
+  $('#tl_plus').onclick=()=>{const i=sel();if(i&&!locked){i.qty=num(i.qty)+1;saveBq(b);refreshCheck();}};
+  $('#tl_minus').onclick=()=>{const i=sel();if(i&&!locked){i.qty=Math.max(0,num(i.qty)-1);if(!i.qty)b.items=b.items.filter(x=>x.id!==i.id);saveBq(b);refreshCheck();}};
+  $('#tl_123').onclick=()=>{const i=sel();if(i&&!locked)numpad({t:'КОЛИЧЕСТВО',sub:i.name},i.qty,'порц',v=>{i.qty=v||1;saveBq(b);refreshCheck();});};
+  $('#tl_del').onclick=()=>{const i=sel();if(i&&!locked)iConfirm('Удалить позицию «'+i.name+'»?',()=>{b.items=b.items.filter(x=>x.id!==i.id);saveBq(b);refreshCheck();});};
+  $('#d_open').onclick=()=>{if(!locked)discountModal(b,refreshCheck);};
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'},{a:'bq',t:'Банкет',ic:'🍽'},{a:'kassa',t:'Касса',ic:'🖩',cls:'accent'},
+    {a:'prepay',t:'Предоплата',ic:'💰',cls:'accent'},{a:'precheck',t:'Пречек',ic:'🧾',cls:'right'},{a:'print',t:'Печать',ic:'🖨'}]);
+  bar._acts={back:()=>go('card'),bq:()=>go('card'),kassa:()=>go('pay'),
+    prepay:()=>prepayModal(b,()=>{refreshCheck();}),precheck:()=>printBq(b,'client'),print:()=>printMenuModal(b)};
+}
+/* скидки как в iiko */
+function discountModal(b,after){
+  const t=bqTotals(b);
+  const mk=(p)=>`<button class="wtile" data-p="${p}" style="padding:26px 8px">От суммы чека ${p}% скидка (-${p}%)<br><br><b>-${fmt(t.sub*p/100)}</b></button>`;
+  modal(`<div class="imodal" style="min-width:820px"><div class="mtitle" style="display:flex;justify-content:space-between;padding:16px 26px">
+    <span>Подытог&nbsp;&nbsp;<b>${fmt(t.sub)}</b></span><span style="background:var(--sel);color:#222;padding:4px 16px">Скидки</span></div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:0 20px">
+      ${[5,10,15,20,30,50].map(mk).join('')}
+      <button class="wtile" id="d_free" style="padding:26px 8px">Свободная скидка, %</button>
+      <button class="wtile" id="d_rub" style="padding:26px 8px">Скидка суммой, р.</button>
+      <button class="wtile" id="d_srv" style="padding:26px 8px">Надбавка за обслуживание, %<br><br><b>${b.servicePct||0}%</b></button>
+    </div>
+    <div class="mbtns"><button id="d_clear">Удалить</button><button class="acc" id="m_ok">ОК</button></div></div>`);
+  const done=()=>{saveBq(b);closeModal();after&&after();};
+  $('#modal').querySelectorAll('[data-p]').forEach(x=>x.onclick=()=>{b.discountPct=num(x.dataset.p);b.discountRub=0;done();});
+  $('#d_free').onclick=()=>numpad({t:'СВОБОДНАЯ СКИДКА'},b.discountPct||'', '%',v=>{b.discountPct=v;saveBq(b);after&&after();});
+  $('#d_rub').onclick=()=>moneyPad('СКИДКА СУММОЙ',v=>{b.discountRub=v;saveBq(b);after&&after();});
+  $('#d_srv').onclick=()=>numpad({t:'НАДБАВКА ЗА ОБСЛУЖИВАНИЕ'},b.servicePct||'', '%',v=>{b.servicePct=v;saveBq(b);after&&after();});
+  $('#d_clear').onclick=()=>{b.discountPct=0;b.discountRub=0;done();};
+  $('#m_ok').onclick=done;
+}
+/* предоплата как в iiko: вкладки групп, подтипы карт, нумпад с +N */
+function prepayModal(b,after){
+  const f=bqFront(b);
+  const sh=f?openShiftFor(f.id):null;
+  if(!sh){iConfirm('Кассовая смена фронта «'+((f||{}).name||'')+'» не открыта. Вносить деньги можно только при открытой смене. Открыть её можно на главном экране в разделе КАССА.',null,'Понятно','Закрыть');return;}
+  let group='Оплата наличными', method='cash', val='';
+  const draw=()=>{
+    const t=bqTotals(b);
+    modal(`<div class="imodal" style="min-width:900px"><div class="mtitle">ПРЕДОПЛАТА</div>
+    <div class="pp-tabs">
+      ${['Безналичный расчет','Банковские карты','Оплата наличными'].map(g=>`<button class="pt ${g===group?'on':''}" data-g="${g}">${g.toUpperCase()}</button>`).join('')}
+    </div>
+    <div class="pp-sel">ВЫБРАННЫЙ ТИП: <b>${mName(method)}</b></div>
+    <div class="paylist">
+      Внесено ранее: ${fmt(t.paid)} · Остаток: ${fmt(Math.max(0,t.rest))}
+      ${(b.payments||[]).map(p=>`<div class="pl"><span>${mName(p.method)} · ${ruDate(p.date)}</span><span>${fmt(p.amount)}
+        ${b.status==='closed'?'':`<button class="x" data-delp="${p.id}">✕</button>`}</span></div>`).join('')}
+    </div>
+    <div class="numwrap"><div class="numdisp"><div class="nd" id="pp_v">${val||'0,00 р.'}</div></div>
+    <div class="numgrid" style="grid-template-columns:repeat(5,130px)">
+      <button data-d="1">1</button><button data-d="2">2</button><button data-d="3">3</button><button class="shade" data-d="+1">+1</button><button class="shade" data-d="+5">+5</button>
+      <button data-d="4">4</button><button data-d="5">5</button><button data-d="6">6</button><button class="shade" data-d="+10">+10</button><button class="shade" data-d="+50">+50</button>
+      <button data-d="7">7</button><button data-d="8">8</button><button data-d="9">9</button><button class="shade" data-d="+100">+100</button><button class="shade" data-d="+500">+500</button>
+      <button data-d=",">,</button><button data-d="0">0</button><button data-d="X">✕</button><button class="shade" data-d="+1000">+1000</button><button class="shade" data-d="+5000">+5000</button>
+    </div></div>
+    <div class="mact"><button id="pp_rest">Остаток (${fmt0(Math.max(0,t.rest))})</button>
+      <button class="acc" id="pp_add" ${b.status==='closed'?'disabled':''}>Внести предоплату</button><button id="pp_close">Закрыть</button></div></div>`);
+    $('#modal').querySelectorAll('[data-g]').forEach(x=>x.onclick=()=>{
+      group=x.dataset.g;
+      if(group==='Оплата наличными'){method='cash';draw();}
+      else if(group==='Безналичный расчет'){method='account';draw();}
+      else{ // выбор способа как в iiko
+        modal(`<div class="imodal"><div class="mtitle">ВЫБОР СПОСОБА ОПЛАТЫ</div>
+        <div class="paymeth">${['qr','otkr','sber','acq'].map(k=>`<button data-m="${k}">${mName(k)}</button>`).join('')}</div>
+        <div class="mbtns"><button id="m_no">Отмена</button></div></div>`);
+        $('#modal').querySelectorAll('[data-m]').forEach(y=>y.onclick=()=>{method=y.dataset.m;group='Банковские карты';draw();});
+        $('#m_no').onclick=()=>{draw();};
+      }
+    });
+    $('#modal').querySelectorAll('[data-d]').forEach(x=>x.onclick=()=>{
+      const d=x.dataset.d;
+      if(d==='X')val='';else if(d.startsWith('+'))val=String(num(val)+num(d.slice(1)));
+      else val=(val==='0'?'':val)+d;
+      $('#pp_v').textContent=val?val+' р.':'0,00 р.';
+    });
+    $('#pp_rest').onclick=()=>{val=String(Math.max(0,bqTotals(b).rest)).replace('.',',');$('#pp_v').textContent=val+' р.';};
+    $('#pp_add').onclick=()=>{
+      const amount=num(val);
+      if(amount<=0){return;}
+      b.payments.push({id:uid(),date:todayISO(),method,amount,ts:new Date().toISOString(),shiftId:sh.id,by:S.user?S.user.name:''});
+      saveBq(b,true);pushIiko('pko');val='';draw();after&&after();
+    };
+    $('#pp_close').onclick=()=>{closeModal();after&&after();};
+    $('#modal').querySelectorAll('[data-delp]').forEach(x=>x.onclick=()=>{
+      iConfirm('Удалить предоплату?',()=>{b.payments=b.payments.filter(p=>p.id!==x.dataset.delp);saveBq(b,true);draw();after&&after();});
+    });
+  };
+  draw();
+}
+function printMenuModal(b){
+  modal(`<div class="imodal"><div class="mtitle">ПЕЧАТЬ</div>
+    <div class="paymeth"><button id="pr_c">Счёт для клиента</button><button id="pr_k">Заказ для кухни</button></div>
+    <div class="mbtns"><button id="m_no">Отмена</button></div></div>`);
+  $('#pr_c').onclick=()=>{closeModal();printBq(b,'client');};
+  $('#pr_k').onclick=()=>{closeModal();printBq(b,'kitchen');};
+  $('#m_no').onclick=closeModal;
+}
+
+/* ================= ОПЛАТА ЗАКАЗА (закрытие) ================= */
+function renderPay(scr,bar){
+  const b=curBq();if(!b){go('list');return;}
+  const t=bqTotals(b);
+  const f=bqFront(b);
+  const sh=f?openShiftFor(f.id):null;
+  scr.innerHTML=`
+  <div class="tophead" style="margin:-10px -10px 10px">
+    <div class="t1">ОПЛАТА ЗАКАЗА #${esc(b.num||'')}</div>
+    <div class="t2">Банкет: ${ruDate(b.date)} ${esc(b.time||'')} · ${esc((f||{}).name||'')}</div>
+    <div class="spacer"></div>
+    ${sh?`<div class="t2">Смена №${sh.data.num}</div>`:`<div class="t2" style="color:#C33">Кассовая смена не открыта!</div>`}
+  </div>
+  <div class="pay-wrap">
+    <div class="pay-left">
+      <div class="ph">Гость 1</div>
+      ${b.items.map(i=>`<div class="itot"><span>${esc(i.qty)} × ${esc(i.name)}</span><span>${fmt(num(i.price)*num(i.qty))}</span></div>`).join('')}
+      <div class="itot"><span>ПОДЫТОГ:</span><span>${fmt(t.sub)}</span></div>
+      ${t.discount?`<div class="itot"><span>СКИДКА:</span><span>-${fmt(t.discount)}</span></div>`:''}
+      ${t.service?`<div class="itot"><span>НАДБАВКА ${b.servicePct}%:</span><span>+${fmt(t.service)}</span></div>`:''}
+      <div class="itot"><span>ПРЕДОПЛАТА:</span><span>${fmt(t.paid)}</span></div>
+      <div class="itot big"><span>ИТОГО:</span><span>${fmt(t.total)}</span></div>
+    </div>
+    <div class="pay-right">
+      <div class="pr-due"><span>К ОПЛАТЕ:</span><b>${fmt(Math.max(0,t.rest))}</b></div>
+      ${(b.payments||[]).map(p=>`<div class="paylist"><div class="pl"><span>ПРЕДОПЛАТА: ${mName(p.method).toUpperCase()}</span><b>${fmt(p.amount)}</b></div></div>`).join('')}
+      <div class="methrow">
+        <button class="mt" id="pm_cash"><span class="ic">💵</span>Наличные</button>
+        <button class="mt" id="pm_card"><span class="ic">💳</span>Банковские карты</button>
+        <button class="mt" id="pm_acc"><span class="ic">🚫</span>Безнал. расчет</button>
+      </div>
+      <div style="color:#bbb;font-size:13px;padding:4px 8px">${t.rest>0.009?'Внесите остаток одним из способов — или через кнопку «Предоплата» на экране заказа.':'Заказ полностью оплачен — можно закрывать.'}</div>
+      ${t.paid>t.total?`<div style="color:#F5C64C;padding:4px 8px">Переплата ${fmt(t.paid-t.total)} — проверьте оплаты.</div>`:''}
+      <button class="paybtn" id="paybtn" ${b.status!=='active'||t.total<=0||t.rest>0.009||!sh?'disabled':''}>ОПЛАТИТЬ</button>
+      ${!sh?'<div style="color:#E77;padding:6px 8px;font-size:13px">Закрыть банкет можно только при открытой кассовой смене фронта (главный экран → КАССА).</div>':''}
+    </div>
+  </div>`;
+  const addPay=(method)=>{
+    if(!sh){iConfirm('Кассовая смена не открыта. Вносить деньги можно только при открытой смене.',null,'Понятно','Закрыть');return;}
+    if(b.status!=='active')return;
+    const doAdd=(m)=>moneyPad('ВНЕСТИ: '+mName(m),v=>{
+      if(v<=0)return;
+      b.payments.push({id:uid(),date:todayISO(),method:m,amount:v,ts:new Date().toISOString(),shiftId:sh.id,by:S.user?S.user.name:''});
+      saveBq(b,true);pushIiko('pko');render();
+    });
+    if(method==='card'){
+      modal(`<div class="imodal"><div class="mtitle">ВЫБОР СПОСОБА ОПЛАТЫ</div>
+      <div class="paymeth">${['qr','otkr','sber','acq'].map(k=>`<button data-m="${k}">${mName(k)}</button>`).join('')}</div>
+      <div class="mbtns"><button id="m_no">Отмена</button></div></div>`);
+      $('#modal').querySelectorAll('[data-m]').forEach(y=>y.onclick=()=>{closeModal();doAdd(y.dataset.m);});
+      $('#m_no').onclick=closeModal;
+    }else doAdd(method==='cash'?'cash':'account');
+  };
+  $('#pm_cash').onclick=()=>addPay('cash');
+  $('#pm_card').onclick=()=>addPay('card');
+  $('#pm_acc').onclick=()=>addPay('account');
+  $('#paybtn').onclick=()=>{
+    iConfirm('Закрыть банкет? Он будет проведён, акт реализации создастся в iiko автоматически в 23:00.',()=>{
+      b.status='closed';b.closedAt=new Date().toISOString();b.iikoStatus='pending';b.shiftId=sh.id;
+      saveBq(b,true);go('list');
+    });
+  };
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'},{a:'order',t:'Заказ',ic:'🍽'},{a:'prepay',t:'Предоплата',ic:'💰'},
+    {a:'check',t:'С товарным чеком',ic:'🧾',cls:'right'}]);
+  bar._acts={back:()=>go('order'),order:()=>go('order'),prepay:()=>prepayModal(b,()=>render()),check:()=>printBq(b,'client')};
+}
+
+/* ================= ЗАКРЫТЫЕ ЗАКАЗЫ ================= */
+function renderClosed(scr,bar){
+  const days=[];for(let i=0;i<7;i++){const d=new Date();d.setDate(d.getDate()-i);days.push(isoOf(d));}
+  if(!days.includes(S.closedDate))S.closedDate=days[0];
+  const rows=S.banquets.filter(x=>x.data.status==='closed'&&(x.data.closedAt||'').slice(0,10)===S.closedDate)
+    .sort((a,b)=>(b.data.closedAt||'').localeCompare(a.data.closedAt||''));
+  scr.innerHTML=`
+  <div class="tophead" style="margin:-10px -10px 0"><div class="t1">Закрытые заказы</div>
+    <div class="spacer"></div><div class="t2">${rows.length} шт.</div></div>
+  <div class="daytabs">${days.map(d=>{const dd=new Date(d+'T00:00:00');
+    return `<button class="dt ${d===S.closedDate?'on':''}" data-d="${d}">${dd.getDate()} ${MONTHS_R[dd.getMonth()]}${d===todayISO()?'<small>Сегодня</small>':''}</button>`;}).join('')}</div>
+  <table class="ilist"><thead><tr><th style="width:70px">№</th><th>Размещение</th><th>Кассовая смена</th><th>Время</th>
+    <th style="width:130px">Сумма</th><th>Состав</th><th>Оплаты</th><th>Акт iiko</th></tr></thead>
+  <tbody>${rows.length?rows.map(x=>{const b=x.data,t=bqTotals(b);
+    const sh=S.shifts.find(s=>s.id===b.shiftId);
+    const pays=Object.entries((b.payments||[]).reduce((m,p)=>{m[p.method]=(m[p.method]||0)+num(p.amount);return m;},{}))
+      .map(([k,s])=>mName(k)+': '+fmt0(s)).join('<br>');
+    return `<tr data-o="${x.id}"><td class="cnt">${esc(b.num||'')}</td>
+    <td>${esc((bqFront(b)||{}).name||'')}${b.tableNum?': '+esc(b.tableNum):''}</td>
+    <td class="cnt">${sh?sh.data.num+(sh.data.closedAt?'<br><small style="color:#888">Закрыта</small>':'<br><small style="color:#2A7">Открыта</small>'):'—'}</td>
+    <td class="cnt">${b.closedAt?ruDT(b.closedAt).split(' ')[1]:''}<br><small style="color:#888">${ruDate(b.date)}</small></td>
+    <td style="text-align:right"><b>${fmt(t.total)}</b></td>
+    <td style="font-size:13px">${b.items.slice(0,3).map(i=>esc(i.name)+' × '+esc(i.qty)).join(';<br>')}${b.items.length>3?'; …':''}</td>
+    <td style="font-size:13px">${pays||'—'}</td>
+    <td class="cnt">${b.iikoStatus==='uploaded'?'<span style="color:#2A7">создан</span>':'<span style="color:#C80">в очереди</span>'}</td></tr>`;}).join('')
+    :`<tr><td colspan="8" style="text-align:center;color:#999;padding:30px">За эту дату закрытых заказов нет</td></tr>`}</tbody></table>`;
+  scr.querySelectorAll('[data-d]').forEach(x=>x.onclick=()=>{S.closedDate=x.dataset.d;render();});
+  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'}]);
+  bar._acts={back:()=>go('home')};
+}
+
+/* ================= ПЕЧАТЬ ================= */
+function printBq(b,mode){
+  const t=bqTotals(b);
+  const rows=b.items.map(i=>`<tr><td>${esc(i.name)}</td><td class="num">${esc(i.qty)}</td>${mode==='client'?`<td class="num">${fmt0(i.price)}</td><td class="num">${fmt0(num(i.price)*num(i.qty))}</td>`:''}</tr>`).join('');
+  $('#printArea').innerHTML=`
+    <h1>${mode==='client'?'Банкетное меню / счёт':'Банкет — для кухни'}</h1>
+    <div>Кафе «Любава» · ${esc((bqRms(b)||{}).name||'')} / ${esc((bqFront(b)||{}).name||'')}</div>
+    <div>Банкет № ${esc(b.num||'')} · <b>${ruDate(b.date)}${b.time?' '+esc(b.time):''}</b>${b.client.guests?' · Гостей: <b>'+esc(b.client.guests)+'</b>':''}</div>
+    ${b.client.name?`<div>Клиент: ${esc(b.client.name)} ${esc(b.client.surname||'')}${b.client.phone?', '+esc(b.client.phone):''}</div>`:''}
+    ${b.comment?`<div>Комментарий: ${esc(b.comment)}</div>`:''}
+    <table><thead><tr><th>Позиция</th><th class="num">Кол-во</th>${mode==='client'?'<th class="num">Цена</th><th class="num">Сумма</th>':''}</tr></thead>
+    <tbody>${rows}</tbody>
+    ${mode==='client'?`<tfoot>
+      ${t.service?`<tr><td colspan="3">Надбавка за обслуживание ${b.servicePct}%</td><td class="num">${fmt0(t.service)}</td></tr>`:''}
+      ${t.discount?`<tr><td colspan="3">Скидка</td><td class="num">−${fmt0(t.discount)}</td></tr>`:''}
+      <tr class="tot"><td colspan="3">Итого</td><td class="num">${fmt0(t.total)}</td></tr>
+      <tr><td colspan="3">Оплачено</td><td class="num">${fmt0(t.paid)}</td></tr>
+      <tr class="tot"><td colspan="3">Остаток</td><td class="num">${fmt0(Math.max(0,t.rest))}</td></tr>
+    </tfoot>`:''}</table>`;
+  window.print();
+}
+function printDay(){
+  const d=todayISO();
+  const rows=S.banquets.filter(x=>x.data.date===d&&x.data.status!=='cancelled');
+  $('#printArea').innerHTML=`<h1>Банкеты на ${ruDate(d)}</h1>
+  <table><thead><tr><th>№</th><th>Время</th><th>Фронт</th><th>Клиент</th><th class="num">Гостей</th><th class="num">Сумма</th><th class="num">Оплачено</th></tr></thead>
+  <tbody>${rows.map(x=>{const b=x.data,t=bqTotals(b);
+    return `<tr><td>${esc(b.num||'')}</td><td>${esc(b.time||'')}</td><td>${esc((bqFront(b)||{}).name||'')}</td>
+    <td>${esc(b.client.name||'')}</td><td class="num">${esc(b.client.guests||'')}</td>
+    <td class="num">${fmt0(t.total)}</td><td class="num">${fmt0(t.paid)}</td></tr>`;}).join('')}</tbody></table>`;
+  window.print();
+}
+
+/* ================= НАСТРОЙКИ (меню и структура) ================= */
+async function renderSettings(scr,bar){
+  if(!S.rms.length){scr.innerHTML='<div class="setwrap">Структура не загружена.</div>';return;}
+  if(!S.menuRms)S.menuRms=S.rms[0].id;
+  const menu=await loadMenu(S.menuRms);
+  const cats=[...new Set(menu.items.map(i=>i.category||'Прочее'))];
+  scr.innerHTML=`<div class="setwrap">
+    <h3>Фронты (концепция и склад — из справочников iiko)</h3>
+    <datalist id="dl_conc">${S.conceptions.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+    <datalist id="dl_store">${S.stores.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+    <table><thead><tr><th>Фронт</th><th>РМС</th><th>Концепция</th><th>Склад</th><th></th></tr></thead><tbody>
+    ${S.fronts.map(f=>`<tr>
+      <td><input data-fn="${f.id}" value="${esc(f.name)}"></td>
+      <td><select data-fr="${f.id}">${S.rms.map(r=>`<option value="${r.id}" ${r.id===f.rmsId?'selected':''}>${esc(r.name)}</option>`).join('')}</select></td>
+      <td><input data-fc="${f.id}" value="${esc(f.conception||'')}" list="dl_conc"></td>
+      <td><input data-fs="${f.id}" value="${esc(f.store||'')}" list="dl_store"></td>
+      <td style="width:40px"><button data-fd="${f.id}" style="border:none;background:none;cursor:pointer">✕</button></td></tr>`).join('')}
+    </tbody></table>
+    <p><button class="wtile" id="addFront" style="padding:10px 20px">+ Добавить фронт</button></p>
+    <h3>Программа</h3>
+    <p class="muted" id="verinfo">Версия: …</p>
+    <p><button class="wtile" id="btn_update" style="padding:10px 20px">Обновить программу</button>
+       <button class="wtile" id="btn_sync" style="padding:10px 20px;margin-left:8px">Обновить меню и сотрудников из iiko</button>
+       <span id="upd_msg" class="muted" style="margin-left:10px"></span></p>
+    <h3>PIN-коды сотрудников (вход во фронт)</h3>
+    <p class="muted">Сотрудники подтянуты из iiko. Если PIN не подошёл или нужен свой — найдите сотрудника и задайте код (4 цифры).</p>
+    <p><input id="emp_q" placeholder="Начните вводить фамилию…" style="max-width:340px"></p>
+    <div id="emp_list"></div>
+    <h3>Меню — <select id="mp" style="width:auto">${S.rms.map(r=>`<option value="${r.id}" ${r.id===S.menuRms?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
+      <span class="muted">${menu.items.length} позиций — меню и цены берутся из действующего прайс-листа iiko автоматически, ручные правки перезапишутся при синхронизации</span></h3>
+    <p style="display:flex;gap:8px"><input id="mi_name" placeholder="Название (точно как в iiko!)" style="flex:2">
+      <input id="mi_cat" placeholder="Категория" list="catlist" style="flex:1"><datalist id="catlist">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist>
+      <input id="mi_price" placeholder="Цена" style="width:100px"><button class="wtile" id="mi_add" style="padding:8px 18px">Добавить</button></p>
+    ${cats.map(c=>`<h3>${esc(c)}</h3><table><tbody>
+      ${menu.items.filter(i=>(i.category||'Прочее')===c).map(i=>`<tr><td>${esc(i.name)}</td>
+      <td style="width:120px"><input data-mp="${i.id}" value="${i.price}"></td>
+      <td style="width:40px"><button data-md="${i.id}" style="border:none;background:none;cursor:pointer">✕</button></td></tr>`).join('')}
+    </tbody></table>`).join('')}
+  </div>`;
+  try{const st=await fetch('/api/status').then(x=>x.json());
+    $('#verinfo').textContent='Версия: '+(st.version||'—')+(st.last_sync_result?' · '+st.last_sync_result:'');}catch(e){$('#verinfo').textContent='Версия: (запущено без сервера)';}
+  const act=(url,msg)=>async()=>{$('#upd_msg').textContent=msg;
+    try{const r=await fetch(url,{method:'POST'}).then(x=>x.json());$('#upd_msg').textContent=r.result||r.error||'готово';}
+    catch(e){$('#upd_msg').textContent='Ошибка: '+e;}};
+  $('#btn_update').onclick=act('/api/update','Проверяю обновления…');
+  $('#btn_sync').onclick=act('/api/sync','Синхронизирую с iiko…');
+  const ovDoc=await dbGetDoc('config/pin_overrides')||{items:{}};
+  function drawEmp(){
+    const q=($('#emp_q').value||'').toLowerCase().trim();
+    const rows=q?S.employees.filter(e=>e.name.toLowerCase().includes(q)).slice(0,15):[];
+    $('#emp_list').innerHTML=rows.length?'<table><tbody>'+rows.map(e=>`<tr><td>${esc(e.name)}</td>
+      <td style="width:130px"><input data-ep="${e.id}" value="${esc((ovDoc.items||{})[e.id]||e.pin||'')}" inputmode="numeric" maxlength="6" placeholder="PIN"></td></tr>`).join('')+'</tbody></table>'
+      :(q?'<p class="muted">Не найдено.</p>':'');
+    $('#emp_list').querySelectorAll('[data-ep]').forEach(i=>i.onchange=()=>{
+      ovDoc.items=ovDoc.items||{};ovDoc.items[i.dataset.ep]=i.value.trim();
+      dbSetDoc('config/pin_overrides',ovDoc);
+      const emp=S.employees.find(e=>e.id===i.dataset.ep);if(emp)emp.pin=i.value.trim();
+    });
+  }
+  $('#emp_q').oninput=drawEmp;drawEmp();
+  const chk=(v,l,w)=>{if(v&&!l.includes(v))alert('Внимание: «'+v+'» нет в справочнике '+w+' iiko — акт реализации не пройдёт.');};
+  scr.querySelectorAll('[data-fn]').forEach(i=>i.onchange=()=>{frontById(i.dataset.fn).name=i.value.trim();saveStructure();});
+  scr.querySelectorAll('[data-fr]').forEach(s=>s.onchange=()=>{frontById(s.dataset.fr).rmsId=s.value;saveStructure();});
+  scr.querySelectorAll('[data-fc]').forEach(i=>i.onchange=()=>{chk(i.value.trim(),S.conceptions,'концепций');frontById(i.dataset.fc).conception=i.value.trim();saveStructure();});
+  scr.querySelectorAll('[data-fs]').forEach(i=>i.onchange=()=>{chk(i.value.trim(),S.stores,'складов');frontById(i.dataset.fs).store=i.value.trim();saveStructure();});
+  scr.querySelectorAll('[data-fd]').forEach(x=>x.onclick=()=>iConfirm('Удалить фронт?',()=>{S.fronts=S.fronts.filter(f=>f.id!==x.dataset.fd);saveStructure();render();}));
+  $('#addFront').onclick=()=>{S.fronts.push({id:uid(),name:'Новый фронт',rmsId:S.rms[0].id,conception:'',store:''});saveStructure();render();};
+  $('#mp').onchange=e=>{S.menuRms=e.target.value;render();};
+  const saveMenu=()=>dbSetDoc('menus/'+S.menuRms,menu);
+  $('#mi_add').onclick=()=>{const n=$('#mi_name').value.trim();if(!n)return;
+    menu.items.push({id:uid(),name:n,category:$('#mi_cat').value.trim()||'Прочее',price:num($('#mi_price').value)});saveMenu();render();};
+  scr.querySelectorAll('[data-mp]').forEach(i=>i.onchange=()=>{menu.items.find(x=>x.id===i.dataset.mp).price=num(i.value);saveMenu();});
+  scr.querySelectorAll('[data-md]').forEach(x=>x.onclick=()=>{menu.items=menu.items.filter(i=>i.id!==x.dataset.md);saveMenu();render();});
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'}]);
+  bar._acts={back:()=>go('home')};
+}
+</script>
