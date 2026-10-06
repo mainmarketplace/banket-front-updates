@@ -994,8 +994,8 @@ async function renderSettings(scr,bar){
        <button class="wtile" id="btn_sync" style="padding:10px 20px;margin-left:8px">Обновить меню и сотрудников из iiko</button>
        <span id="upd_msg" class="muted" style="margin-left:10px"></span></p>
     <h3>PIN-коды сотрудников (вход во фронт)</h3>
-    <p class="muted">Сотрудники подтянуты из iiko. Если PIN не подошёл или нужен свой — найдите сотрудника и задайте код (4 цифры).</p>
-    <p><input id="emp_q" placeholder="Начните вводить фамилию…" style="max-width:340px"></p>
+    <p class="muted">Сотрудники подтянуты из iiko (iiko не отдаёт PIN-коды по API). Найдите сотрудника и введите его PIN как в iikoFront — код сохранится в общий список и подтянется на все фронты в течение 10 минут.</p>
+    <p><input id="emp_q" placeholder="Начните вводить фамилию…" style="max-width:340px"> <span id="pin_msg" class="muted" style="margin-left:10px"></span></p>
     <div id="emp_list"></div>
     <h3>Меню — <select id="mp" style="width:auto">${S.rms.map(r=>`<option value="${r.id}" ${r.id===S.menuRms?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
       <span class="muted">${menu.items.length} позиций — меню и цены берутся из действующего прайс-листа iiko автоматически, ручные правки перезапишутся при синхронизации</span></h3>
@@ -1022,10 +1022,15 @@ async function renderSettings(scr,bar){
     $('#emp_list').innerHTML=rows.length?'<table><tbody>'+rows.map(e=>`<tr><td>${esc(e.name)}</td>
       <td style="width:130px"><input data-ep="${e.id}" value="${esc((ovDoc.items||{})[e.id]||e.pin||'')}" inputmode="numeric" maxlength="6" placeholder="PIN"></td></tr>`).join('')+'</tbody></table>'
       :(q?'<p class="muted">Не найдено.</p>':'');
-    $('#emp_list').querySelectorAll('[data-ep]').forEach(i=>i.onchange=()=>{
-      ovDoc.items=ovDoc.items||{};ovDoc.items[i.dataset.ep]=i.value.trim();
-      dbSetDoc('config/pin_overrides',ovDoc);
-      const emp=S.employees.find(e=>e.id===i.dataset.ep);if(emp)emp.pin=i.value.trim();
+    $('#emp_list').querySelectorAll('[data-ep]').forEach(i=>i.onchange=async()=>{
+      const pin=i.value.trim();
+      const emp=S.employees.find(e=>e.id===i.dataset.ep);if(emp)emp.pin=pin;
+      $('#pin_msg').textContent='Сохраняю…';
+      try{const r=await fetch('/api/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:i.dataset.ep,pin})}).then(x=>x.json());
+        $('#pin_msg').textContent=r.result||r.error||'готово';
+        if(r.shared){ovDoc.items=ovDoc.items||{};delete ovDoc.items[i.dataset.ep];}
+        else{ovDoc.items=ovDoc.items||{};ovDoc.items[i.dataset.ep]=pin;}
+      }catch(e){ovDoc.items=ovDoc.items||{};ovDoc.items[i.dataset.ep]=pin;dbSetDoc('config/pin_overrides',ovDoc);$('#pin_msg').textContent='Сохранено только на этом компьютере';}
     });
   }
   $('#emp_q').oninput=drawEmp;drawEmp();

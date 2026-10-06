@@ -421,33 +421,90 @@ def release(version):
     log("Релиз: " + res)
     return res
 
-def sync_employees():
-    """Тянет сотрудников с PIN-кодами из iiko — для входа во фронт, как в iikoFront."""
-    ii = Iiko(CFG)
+GIST_ID = "06a9426f7c6177bcac1b70496115af2c"
+GIST_RAW = "https://gist.githubusercontent.com/mainmarketplace/%s/raw/" % GIST_ID
+
+def gist_raw(name, timeout=30):
+    url = GIST_RAW + name + "?t=%d" % int(time.time())
+    return urllib.request.urlopen(url, timeout=timeout).read().decode("utf-8-sig")
+
+def load_shared_pins():
+    """Общий список PIN всех фронтов: {id сотрудника: pin}. iiko не отдаёт PIN-коды по API."""
     try:
-        ii.auth()
-        emps, tagstats = ii.employees()
-    finally:
-        ii.logout()
-    # iiko не отдаёт PIN-коды фронта по API, поэтому PIN берём из общего списка (pins_url, по ФИО),
-    # а поверх — локальные правки из настроек фронта
-    for e in emps:
-        e["pin"] = ""
-    pins_url = CFG.get("pins_url", "https://gist.githubusercontent.com/mainmarketplace/06a9426f7c6177bcac1b70496115af2c/raw/pins.json")
-    shared = {}
-    try:
-        raw = urllib.request.urlopen(pins_url + "?t=%d" % int(time.time()), timeout=30).read().decode("utf-8-sig")
-        shared = json.loads(raw) or {}
+        return json.loads(gist_raw(CFG.get("pins_file", "pins.json"))) or {}
     except Exception as ex:
         log("Общий список PIN недоступен: %s" % ex)
+        return None
+
+def gist_token():
+    t = CFG.get("github_token") or ""
+    if t:
+        return t
+    try:
+        return (json.loads(gist_raw("secrets.json")) or {}).get("github_token") or ""
+    except Exception:
+        return ""
+
+def set_shared_pin(emp_id, pin):
+    """Запись PIN в общий список — сразу для всех фронтов."""
+    tok = gist_token()
+    if not tok:
+        raise Exception("нет доступа к общему списку PIN — код сохранён только на этом компьютере")
+    shared = load_shared_pins()
+    if shared is None:
+        raise Exception("общий список PIN недоступен — код сохранён только на этом компьютере")
+    pin = str(pin or "").strip()
+    if pin:
+        shared[emp_id] = pin
+    else:
+        shared.pop(emp_id, None)
+    body = json.dumps({"files": {CFG.get("pins_file", "pins.json"): {"content": json.dumps(shared, ensure_ascii=False, indent=1)}}}).encode("utf-8")
+    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID, data=body, method="PATCH")
+    req.add_header("Authorization", "Bearer " + tok)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "banket-front")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        if r.status not in (200, 201):
+            raise Exception("GitHub ответил %s" % r.status)
+    return shared
+
+def apply_pins(emps, shared):
     for e in emps:
-        pin = shared.get(e.get("id") or "") or shared.get(e["name"]) or shared.get(e["name"].strip())
+        e["pin"] = ""
+        pin = (shared or {}).get(e.get("id") or "") or (shared or {}).get(e["name"]) or (shared or {}).get(e["name"].strip())
         if pin:
             e["pin"] = str(pin).strip()
     ov = (doc_get("config/pin_overrides") or {}).get("items") or {}
     for e in emps:
         if ov.get(e.get("id")):
             e["pin"] = ov[e["id"]]
+    return emps
+
+def refresh_pins(shared=None):
+    """Перечитать общий список PIN без обращения к iiko (каждые 10 минут)."""
+    doc = doc_get("config/employees") or {}
+    emps = doc.get("items") or []
+    if not emps:
+        return "сотрудники ещё не загружены"
+    if shared is None:
+        shared = load_shared_pins()
+    if shared is None:
+        return "общий список PIN недоступен"
+    apply_pins(emps, shared)
+    doc["items"] = emps
+    doc_set("config/employees", doc)
+    return "PIN обновлены: %d" % len([e for e in emps if e.get("pin")])
+
+def sync_employees():
+    """Тянет сотрудников из iiko, PIN — из общего списка (iiko не отдаёт PIN-коды по API)."""
+    ii = Iiko(CFG)
+    try:
+        ii.auth()
+        emps, tagstats = ii.employees()
+    finally:
+        ii.logout()
+    apply_pins(emps, load_shared_pins())
     with_pin = [e for e in emps if e.get("pin")]
     doc_set("config/employees", {"items": emps, "fields": tagstats,
                                  "syncedAt": datetime.datetime.now().isoformat()})
@@ -610,9 +667,14 @@ def scheduler():
     last_akt_day = None
     last_price_sync = 0
     last_update_check = 0
+    last_pins = 0
     while True:
         try:
             now = datetime.datetime.now()
+            if time.time() - last_pins > 600:
+                last_pins = time.time()
+                try: refresh_pins()
+                except Exception as e: log("Обновление PIN: %s" % e)
             if CFG.get("iiko_login") and CFG.get("iiko_password"):
                 if time.time() - last_price_sync > float(CFG.get("menu_sync_hours", 6)) * 3600:
                     last_price_sync = time.time()
@@ -624,13 +686,13 @@ def scheduler():
                 last_update_check = time.time()
                 try: check_update()
                 except Exception as e: log("Проверка обновлений: %s" % e)
-                hh, mm = CFG.get("akt_time", "23:00").split(":")
-                if now.hour == int(hh) and now.minute >= int(mm) and last_akt_day != now.date():
-                    last_akt_day = now.date()
-                    try: run_akty()
-                    except Exception as e: log("Ошибка актов: %s" % e)
-                    try: run_payments()
-                    except Exception as e: log("Ошибка выгрузки оплат: %s" % e)
+            hh, mm = CFG.get("akt_time", "23:00").split(":")
+            if CFG.get("iiko_login") and now.hour == int(hh) and now.minute >= int(mm) and last_akt_day != now.date():
+                last_akt_day = now.date()
+                try: run_akty()
+                except Exception as e: log("Ошибка актов: %s" % e)
+                try: run_payments()
+                except Exception as e: log("Ошибка выгрузки оплат: %s" % e)
         except Exception as e:
             log("Планировщик: %s" % e)
         time.sleep(30)
@@ -778,6 +840,29 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, '{"result":"restarting"}')
             if p.path == "/api/akty":
                 return self._send(200, json.dumps({"result": run_akty()}, ensure_ascii=False))
+            if p.path == "/api/pins":
+                # PIN сотрудника из настроек фронта → общий список для всех фронтов
+                ln = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
+                emp_id, pin = body.get("id") or "", str(body.get("pin") or "").strip()
+                if not emp_id:
+                    return self._send(400, '{"error":"нет id сотрудника"}')
+                try:
+                    shared = set_shared_pin(emp_id, pin)
+                    ov = doc_get("config/pin_overrides") or {"items": {}}
+                    (ov.get("items") or {}).pop(emp_id, None)
+                    doc_set("config/pin_overrides", ov)
+                    refresh_pins(shared)
+                    return self._send(200, json.dumps({"ok": True, "shared": True, "result": "PIN сохранён для всех фронтов"}, ensure_ascii=False))
+                except Exception as e:
+                    ov = doc_get("config/pin_overrides") or {"items": {}}
+                    ov.setdefault("items", {})
+                    if pin: ov["items"][emp_id] = pin
+                    else: ov["items"].pop(emp_id, None)
+                    doc_set("config/pin_overrides", ov)
+                    refresh_pins()
+                    log("PIN в общий список не записан: %s" % e)
+                    return self._send(200, json.dumps({"ok": True, "shared": False, "result": str(e)}, ensure_ascii=False))
             if p.path == "/api/push":
                 ln = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
