@@ -24,7 +24,8 @@ FROZEN = getattr(sys, "frozen", False)
 # server.py всегда лежит рядом с BanketFront.exe (exe — тонкая оболочка, запускающая этот файл)
 BASE = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE, "version.txt")
-UPDATABLE = ("server.py", "front.html")
+UPDATABLE = ("server.py", "front.html", "front.ico", "favicon.png")
+ICON_PATH = os.path.join(BASE, "front.ico")
 CONFIG_PATH = os.path.join(BASE, "config.json")
 DB_PATH = os.path.join(BASE, "banket.db")
 FRONT_PATH = os.path.join(BASE, "front.html")
@@ -739,6 +740,33 @@ class Handler(BaseHTTPRequestHandler):
         if p.path.startswith("/api/col/"):
             prefix = urllib.parse.unquote(p.path[len("/api/col/"):])
             return self._send(200, json.dumps(col_get(prefix), ensure_ascii=False))
+        if p.path in ("/favicon.png", "/favicon.ico", "/front.ico"):
+            fn = "front.ico" if p.path.endswith(".ico") else "favicon.png"
+            try:
+                data = open(os.path.join(BASE, fn), "rb").read()
+            except Exception:
+                return self._send(404, "")
+            return self._send(200, data, "image/x-icon" if fn.endswith(".ico") else "image/png")
+        if p.path == "/api/debug/employee":
+            # все поля сотрудника в том виде, как их отдаёт iiko (поиск по части ФИО)
+            q = (urllib.parse.parse_qs(p.query).get("q") or [""])[0].lower().strip()
+            try:
+                ii = Iiko(CFG); ii.auth()
+                try:
+                    xmls = ii._req("/resto/api/employees")
+                finally:
+                    ii.logout()
+                out = []
+                for el in ET.fromstring(xmls):
+                    d = {}
+                    for c in el:
+                        d[c.tag] = (c.text or "").strip() if len(c) == 0 else [(x.text or "").strip() for x in c]
+                    nm = (d.get("name") or "") if isinstance(d.get("name"), str) else ""
+                    if q and q in nm.lower():
+                        out.append(d)
+                return self._send(200, json.dumps(out, ensure_ascii=False, indent=1))
+            except Exception as e:
+                return self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False))
         if p.path == "/api/debug/net":
             out = {}
             q = urllib.parse.parse_qs(p.query)
@@ -937,6 +965,44 @@ def port_busy(port):
     except OSError:
         return False
 
+def ensure_branding():
+    """Иконка фронта (логотип «Любава» + «фронт») на ярлыках рабочего стола и меню «Пуск»."""
+    if os.name != "nt":
+        return
+    try:
+        if not os.path.exists(ICON_PATH):
+            check_update(force=True)  # докачать иконку, если версия пришла без неё
+        if not os.path.exists(ICON_PATH):
+            return
+        exe = sys.executable
+        pyw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+        if os.path.exists(pyw):
+            exe = pyw
+        script = os.path.abspath(__file__)
+        ps = (
+            "$sh = New-Object -ComObject WScript.Shell\r\n"
+            "foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {\r\n"
+            "  $l = $sh.CreateShortcut((Join-Path $d 'Банкетный фронт.lnk'))\r\n"
+            "  $l.TargetPath = '%s'\r\n"
+            "  $l.Arguments = '\"%s\"'\r\n"
+            "  $l.WorkingDirectory = '%s'\r\n"
+            "  $l.IconLocation = '%s,0'\r\n"
+            "  $l.Description = 'Банкетный фронт Любава'\r\n"
+            "  $l.Save()\r\n"
+            "}\r\n"
+            "ie4uinit.exe -show\r\n"
+        ) % (exe.replace("'", "''"), script.replace("'", "''"), BASE.replace("'", "''"), ICON_PATH.replace("'", "''"))
+        p = os.path.join(BASE, "logs", "shortcuts.ps1")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8-sig") as f:
+            f.write(ps)
+        import subprocess
+        subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", p],
+                       timeout=60, creationflags=0x08000000)
+        log("Ярлыки «Банкетный фронт» с логотипом обновлены (рабочий стол и «Пуск»)")
+    except Exception as e:
+        log("Ярлыки: %s" % e)
+
 def main():
     global HTTPD
     port = int(CFG.get("port", 8100))
@@ -947,6 +1013,7 @@ def main():
             open_front_window()
         return
     seed_if_empty()
+    threading.Thread(target=ensure_branding, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=code_watcher, daemon=True).start()
     log("Банкетный фронт запущен: http://localhost:%d" % port)

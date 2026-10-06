@@ -1,15 +1,25 @@
 {
- "version": "2026.10.06.2",
+ "version": "2026.10.06.3",
  "files": {
   "server.py": {
    "url": "https://raw.githubusercontent.com/mainmarketplace/banket-front-updates/main/server.py",
-   "sha256": "5738244a4bd3370af97edd3e1c713b349b389ad8a30b243bd8d14b8bc7eeb72a",
-   "size": 48537
+   "sha256": "5e9d2ed39774956eab76d8d02f789b0a12b2a8e58436cc29406468e0175f5e59",
+   "size": 52145
   },
   "front.html": {
    "url": "https://raw.githubusercontent.com/mainmarketplace/banket-front-updates/main/front.html",
-   "sha256": "b50e2acd42c1681eb4ae69e4141678165d549f5f1dead6802dbfc072e301da00",
-   "size": 76849
+   "sha256": "c394e116b6a4196109454adc8d09e2b12f678c28ec14880ef6816a586c50e17e",
+   "size": 76906
+  },
+  "front.ico": {
+   "url": "https://raw.githubusercontent.com/mainmarketplace/banket-front-updates/main/front.ico",
+   "sha256": "882c9e57d24c582b8c12ab7f0a127d88029fdd12b86dd73f1b2fe5034b99012e",
+   "size": 156354
+  },
+  "favicon.png": {
+   "url": "https://raw.githubusercontent.com/mainmarketplace/banket-front-updates/main/favicon.png",
+   "sha256": "2294338f1f989ec29115b6c051e54295789fb8b9f2509a2038a0ab1e10683cab",
+   "size": 104794
   }
  }
 }
