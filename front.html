@@ -271,6 +271,12 @@ function shiftNum(fid){return S.shifts.filter(x=>x.data.frontId===fid).length;}
   S.rms=st.rms||[];S.fronts=st.fronts||[];S.conceptions=st.conceptions||[];S.stores=st.stores||[];
   const emp=await dbGetDoc('config/employees')||{};
   S.employees=(emp.items||[]).filter(e=>e&&e.name);
+  S.employeesLoaded=S.employees.length>0;
+  if(!S.employeesLoaded){ // первый запуск: ждём, пока программа скачает сотрудников из iiko
+    const t=setInterval(async()=>{const e2=await dbGetDoc('config/employees')||{};const l=(e2.items||[]).filter(e=>e&&e.name);
+      if(l.length){S.employees=l;S.employeesLoaded=true;clearInterval(t);render();}},4000);
+    setTimeout(()=>{if(!S.employeesLoaded){S.employeesLoaded=true;S.noEmployees=true;render();}},90000);
+  }
   S.banquets=await dbGetCol('banquets');
   S.shifts=await dbGetCol('shifts');
   if(!S.frontId&&S.fronts.length)S.frontId=S.fronts[0].id;
@@ -300,6 +306,7 @@ function saveBq(b,now){b.updatedAt=new Date().toISOString();clearTimeout(saveTim
 /* ================= каркас ================= */
 function render(){
   const scr=$('#screen'),bar=$('#botbar');
+  if(!S.employeesLoaded&&db){renderWait(scr,bar);return;}
   if(pinRequired()&&!S.user){renderLock(scr,bar);return;}
   $('#userlbl').textContent=(S.user?S.user.name+' · ':'')+(curFront()? (rmsById(curFront().rmsId)||{}).name+' / '+curFront().name:'');
   if(S.screen==='home')renderHome(scr,bar);
@@ -355,6 +362,13 @@ function moneyPad(title,cb){
   numpad({t:title},'', 'р.',cb,['+1','+5','+10','+50','+100','+500','+1000','+5000']);
 }
 
+/* ================= ЭКРАН ОЖИДАНИЯ: первый запуск, загрузка сотрудников из iiko ================= */
+function renderWait(scr,bar){
+  bar.innerHTML='';$('#userlbl').textContent='';
+  scr.innerHTML=`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:14px;color:#ddd">
+    <div style="font-size:22px">Подключение к iiko…</div>
+    <div style="color:#999">Загружаю сотрудников и меню. Обычно это 10–30 секунд после запуска.</div></div>`;
+}
 /* ================= ЭКРАН БЛОКИРОВКИ: вход по PIN, как в iikoFront ================= */
 let pinBuf='';
 function renderLock(scr,bar){

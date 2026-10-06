@@ -429,7 +429,21 @@ def sync_employees():
         emps, tagstats = ii.employees()
     finally:
         ii.logout()
-    # PIN-коды, заданные вручную в настройках фронта, важнее кода из iiko
+    # iiko не отдаёт PIN-коды фронта по API, поэтому PIN берём из общего списка (pins_url, по ФИО),
+    # а поверх — локальные правки из настроек фронта
+    for e in emps:
+        e["pin"] = ""
+    pins_url = CFG.get("pins_url", "https://gist.githubusercontent.com/mainmarketplace/06a9426f7c6177bcac1b70496115af2c/raw/pins.json")
+    shared = {}
+    try:
+        raw = urllib.request.urlopen(pins_url + "?t=%d" % int(time.time()), timeout=30).read().decode("utf-8-sig")
+        shared = json.loads(raw) or {}
+    except Exception as ex:
+        log("Общий список PIN недоступен: %s" % ex)
+    for e in emps:
+        pin = shared.get(e.get("id") or "") or shared.get(e["name"]) or shared.get(e["name"].strip())
+        if pin:
+            e["pin"] = str(pin).strip()
     ov = (doc_get("config/pin_overrides") or {}).get("items") or {}
     for e in emps:
         if ov.get(e.get("id")):
@@ -602,10 +616,10 @@ def scheduler():
             if CFG.get("iiko_login") and CFG.get("iiko_password"):
                 if time.time() - last_price_sync > float(CFG.get("menu_sync_hours", 6)) * 3600:
                     last_price_sync = time.time()
-                    try: sync_menu()
-                    except Exception as e: log("Ошибка синка меню: %s" % e)
                     try: sync_employees()
                     except Exception as e: log("Ошибка синка сотрудников: %s" % e)
+                    try: sync_menu()
+                    except Exception as e: log("Ошибка синка меню: %s" % e)
             if time.time() - last_update_check > 3600:
                 last_update_check = time.time()
                 try: check_update()
