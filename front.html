@@ -244,7 +244,7 @@ async function dbGetCol(p){if(!db)return[];try{return unwrapCol(await db.collect
 /* ================= состояние ================= */
 const S={
   screen:'home', rms:[],fronts:[],conceptions:[],stores:[],menus:{},banquets:[],shifts:[],
-  listDate:todayISO(), listFilter:'act', closedDate:todayISO(),
+  listDate:todayISO(), listFilter:'act', listMode:'day', monthFilter:'overdue', closedDate:todayISO(),
   editingId:null, cat:null, selItem:null, frontId:null,
   employees:[], user:null
 };
@@ -425,7 +425,10 @@ function renderHome(scr,bar){
     </div>
     <div class="hcol"><div class="hsec">
       <div class="hhead" style="background:#5B8DB8">ГОСТИ</div>
-      <div class="hbody"><button class="wtile" id="h_bq">Банкеты и резервы</button></div>
+      <div class="hbody"><button class="wtile" id="h_bq">Банкеты и резервы</button>
+        ${(()=>{const o=monthStats(monthOf(todayISO())).overdue;return o.length
+          ?`<button class="wtile" id="h_overdue" style="background:var(--red);color:#fff;font-weight:700">Не проведено прошедших банкетов: ${o.length}<br><small style="font-weight:400">выручка не попадёт в ОПиУ месяца — проведите до конца месяца</small></button>`
+          :`<button class="wtile" id="h_month">Банкеты месяца: все прошедшие проведены ✓</button>`;})()}</div>
     </div></div>
     <div class="hcol"><div class="hsec">
       <div class="hhead" style="background:var(--green)">СЕРВИС</div>
@@ -450,8 +453,9 @@ function renderHome(scr,bar){
   $('#h_settings').onclick=()=>go('settings');
   $('#h_closed').onclick=()=>go('closed');
   $('#h_closed2').onclick=()=>go('closed');
-  $('#h_bq').onclick=()=>go('list');
-  $('#h_bq2').onclick=()=>go('list');
+  $('#h_bq').onclick=()=>{S.listMode='day';go('list');};
+  $('#h_bq2').onclick=()=>{S.listMode='day';go('list');};
+  const ho=$('#h_overdue')||$('#h_month');if(ho)ho.onclick=()=>{S.listDate=todayISO();S.listMode='month';S.monthFilter=$('#h_overdue')?'overdue':'all';go('list');};
   $('#h_print').onclick=()=>printDay();
   const ko=$('#k_open');if(ko)ko.onclick=async()=>{
     const shd={id:uid(),frontId:f.id,num:shiftNum(f.id)+1,openedAt:new Date().toISOString(),closedAt:null};
@@ -509,7 +513,73 @@ function lateText(b){
   const h=Math.floor(mins/60),m=mins%60;
   return 'Опаздывают на '+(h?h+' ч. ':'')+m+' мин.!';
 }
+/* Банкеты месяца: прошедшие, но не закрытые — выручка не попадёт в ОПиУ месяца, пока их не провести */
+function monthOf(iso){return (iso||'').slice(0,7);}
+function monthStats(ym){
+  const all=S.banquets.filter(x=>monthOf(x.data.date)===ym);
+  const today=todayISO();
+  const g={overdue:[],upcoming:[],done:[],off:[]};
+  all.forEach(x=>{const b=x.data;
+    if(b.status==='closed')g.done.push(x);
+    else if(b.status==='cancelled')g.off.push(x);
+    else if(b.date<today)g.overdue.push(x);
+    else g.upcoming.push(x);});
+  g.all=all;return g;
+}
+function renderMonth(scr,bar){
+  const ym=monthOf(S.listDate);const [y,m]=ym.split('-').map(Number);
+  const g=monthStats(ym);const F=S.monthFilter||'overdue';
+  let rows=F==='all'?g.all:(g[F]||[]);
+  rows=rows.slice().sort((a,b)=>(a.data.date+(a.data.time||'')).localeCompare(b.data.date+(b.data.time||'')));
+  const sum=l=>l.reduce((s,x)=>s+bqTotals(x.data).total,0);
+  scr.innerHTML=`
+  <div class="listtop">
+    <button class="icbtn" id="mday"><span class="ic">☰</span>ПО ДНЯМ</button>
+    <button class="icbtn on"><span class="ic">📆</span>МЕСЯЦ</button>
+    <div class="datenav">
+      <button class="arr" id="mprev">‹</button>
+      <div><b>${MONTHS_N[m-1]} ${y}</b><small>${ym===monthOf(todayISO())?'(Текущий месяц)':''}</small></div>
+      <button class="arr" id="mnext">›</button>
+    </div>
+    <div style="color:${g.overdue.length?'#FF8A80':'#9BE29B'};font-size:15px;max-width:360px;text-align:right">
+      ${g.overdue.length?`Прошедших, но не проведённых: <b>${g.overdue.length}</b> на ${fmt0(sum(g.overdue))} ₽ — их выручка ещё НЕ в ОПиУ ${MONTHS_R[m-1]}`
+        :`Все прошедшие банкеты ${MONTHS_R[m-1]} проведены — выручка в ОПиУ`}</div>
+  </div>
+  <div class="statchips">
+    <button class="sc ${F==='overdue'?'on':''}" data-mf="overdue" style="${g.overdue.length&&F!=='overdue'?'color:#FF8A80':''}">Не проведены (прошли) <b>${g.overdue.length}</b></button>
+    <button class="sc ${F==='upcoming'?'on':''}" data-mf="upcoming">Предстоят <b>${g.upcoming.length}</b></button>
+    <button class="sc dark ${F==='done'?'on':''}" data-mf="done">Проведены <b>${g.done.length}</b></button>
+    <button class="sc dark ${F==='off'?'on':''}" data-mf="off">Сняты <b>${g.off.length}</b></button>
+    <button class="sc dark ${F==='all'?'on':''}" data-mf="all">Все <b>${g.all.length}</b></button>
+  </div>
+  <table class="ilist"><thead><tr><th style="width:80px">№ Заказа</th><th style="width:150px">Дата</th><th style="width:190px">Статус</th>
+  <th>Зал (фронт)</th><th>Клиент</th><th style="width:130px">Сумма</th><th style="width:130px">Внесено</th><th style="width:130px">Остаток</th></tr></thead>
+  <tbody>${rows.length?rows.map(x=>{const b=x.data,t=bqTotals(b);
+    const st=b.status==='closed'?`<td class="stat-neu">Проведен${b.iikoStatus==='uploaded'?'<br><small style="color:#2A7">акт в iiko</small>':b.iikoStatus==='pending'?'<br><small style="color:#888">акт в очереди</small>':''}</td>`
+      :b.status==='cancelled'?`<td class="stat-neu">Снят</td>`
+      :b.date<todayISO()?`<td class="stat-late">Прошёл, не проведён!</td>`
+      :`<td class="stat-neu" style="color:#2A7">Предстоит</td>`;
+    return `<tr data-o="${x.id}"><td class="cnt">${esc(b.num||'')}</td>
+    <td class="cnt"><b>${ruDate(b.date)}</b><br><small style="color:#888">${esc(b.time||'')}</small></td>${st}
+    <td>${esc((bqFront(b)||{}).name||'—')}</td>
+    <td>${esc(b.client&&b.client.name||'')}${b.client&&b.client.phone?'<br><small>т. '+esc(b.client.phone)+'</small>':''}</td>
+    <td style="text-align:right">${fmt0(t.total)}</td>
+    <td style="text-align:right;color:#2A7">${fmt0(t.paid)}</td>
+    <td style="text-align:right;${t.rest>0.009&&b.status==='active'?'color:#C00;font-weight:700':''}">${fmt0(t.rest)}</td></tr>`;}).join('')
+    :`<tr><td colspan="8" style="text-align:center;color:#999;padding:30px">Нет банкетов</td></tr>`}
+  ${rows.length?`<tr style="background:#F2F2F2;font-weight:700"><td colspan="5" style="text-align:right">Итого по списку:</td>
+    <td style="text-align:right">${fmt0(sum(rows))}</td><td style="text-align:right">${fmt0(rows.reduce((s,x)=>s+bqTotals(x.data).paid,0))}</td>
+    <td style="text-align:right">${fmt0(rows.reduce((s,x)=>s+bqTotals(x.data).rest,0))}</td></tr>`:''}</tbody></table>`;
+  const shiftMonth=dl=>{const nd=new Date(y,m-1+dl,1);S.listDate=isoOf(nd);render();};
+  $('#mprev').onclick=()=>shiftMonth(-1);$('#mnext').onclick=()=>shiftMonth(1);
+  $('#mday').onclick=()=>{S.listMode='day';render();};
+  scr.querySelectorAll('[data-mf]').forEach(b=>b.onclick=()=>{S.monthFilter=b.dataset.mf;render();});
+  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
+  botbar(bar,[{a:'back',t:'Назад',ic:'‹'}]);
+  bar._acts={back:()=>go('home')};
+}
 function renderList(scr,bar){
+  if(S.listMode==='month'){renderMonth(scr,bar);return;}
   const d=S.listDate;
   const all=S.banquets.filter(x=>x.data.date===d);
   const groups={act:[],started:[],late:[],done:[],off:[]};
@@ -520,8 +590,8 @@ function renderList(scr,bar){
   const dd=new Date(d+'T00:00:00');
   scr.innerHTML=`
   <div class="listtop">
-    <button class="icbtn on"><span class="ic">☰</span>ВСЕ ЗАКАЗЫ</button>
-    <button class="icbtn"><span class="ic">🍽</span>БАНКЕТЫ</button>
+    <button class="icbtn on"><span class="ic">☰</span>ПО ДНЯМ</button>
+    <button class="icbtn" id="mmonth"><span class="ic">📆</span>МЕСЯЦ${(()=>{const o=monthStats(monthOf(d)).overdue.length;return o?` <b style="color:#FF8A80">(${o}!)</b>`:'';})()}</button>
     <div class="datenav">
       <button class="arr" id="dprev">‹</button>
       <div><b>${dd.getDate()} ${MONTHS_R[dd.getMonth()]} ${dd.getFullYear()}</b><small>${d===todayISO()?'(Сегодня)':''}</small></div>
@@ -557,6 +627,7 @@ function renderList(scr,bar){
   $('#dprev').onclick=()=>shiftDate(-1);
   $('#dnext').onclick=()=>shiftDate(1);
   $('#dcal').onclick=calModal;
+  $('#mmonth').onclick=()=>{S.listMode='month';S.monthFilter='overdue';render();};
   scr.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{S.listFilter=b.dataset.f;render();});
   scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
   botbar(bar,[{a:'back',t:'Назад',ic:'‹'},{a:'new',t:'Новый банкет',ic:'🍽',cls:'right accent'}]);
