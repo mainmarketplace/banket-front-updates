@@ -69,6 +69,12 @@ def doc_set(path, data):
                   (path, json.dumps(data, ensure_ascii=False), datetime.datetime.now().isoformat()))
         c.commit(); c.close()
 
+def doc_del(path):
+    with _dblock:
+        c = _conn()
+        c.execute("DELETE FROM docs WHERE path=?", (path,))
+        c.commit(); c.close()
+
 def col_get(prefix):
     with _dblock:
         c = _conn()
@@ -820,6 +826,13 @@ class Handler(BaseHTTPRequestHandler):
                 "iiko_configured": bool(CFG.get("iiko_login") and CFG.get("iiko_password")),
                 "version": local_version(),
                 **SYNC_STATE}, ensure_ascii=False))
+        return self._send(404, '{"error":"not found"}')
+
+    def do_DELETE(self):
+        p = urllib.parse.urlparse(self.path)
+        if p.path.startswith("/api/doc/"):
+            doc_del(urllib.parse.unquote(p.path[len("/api/doc/"):]))
+            return self._send(200, '{"ok":true}')
         return self._send(404, '{"error":"not found"}')
 
     def do_PUT(self):
