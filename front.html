@@ -254,6 +254,8 @@ function pushIiko(kind,extra){
     body:JSON.stringify(Object.assign({kind:kind},extra||{}))}).catch(()=>{});}catch(e){}
 }
 const pinRequired=()=>S.employees.some(e=>e.pin);
+const OWNER_ID='5d1a33e6-028e-4f2d-9939-0e764f515581'; // Хозяйкин Алексей Владимирович — только он выдаёт PIN-коды
+const isOwner=()=>!!(S.user&&S.user.id===OWNER_ID);
 try{S.frontId=localStorage.getItem('bq_front')||null;}catch(e){}
 const frontById=id=>S.fronts.find(f=>f.id===id);
 const rmsById=id=>S.rms.find(r=>r.id===id);
@@ -1089,10 +1091,10 @@ async function renderSettings(scr,bar){
     <p><button class="wtile" id="btn_update" style="padding:10px 20px">Обновить программу</button>
        <button class="wtile" id="btn_sync" style="padding:10px 20px;margin-left:8px">Обновить меню и сотрудников из iiko</button>
        <span id="upd_msg" class="muted" style="margin-left:10px"></span></p>
-    <h3>PIN-коды сотрудников (вход во фронт)</h3>
+    ${isOwner()?`<h3>PIN-коды сотрудников (вход во фронт)</h3>
     <p class="muted">Сотрудники подтянуты из iiko (iiko не отдаёт PIN-коды по API). Найдите сотрудника и введите его PIN как в iikoFront — код сохранится в общий список и подтянется на все фронты в течение 10 минут.</p>
     <p><input id="emp_q" placeholder="Начните вводить фамилию…" style="max-width:340px"> <span id="pin_msg" class="muted" style="margin-left:10px"></span></p>
-    <div id="emp_list"></div>
+    <div id="emp_list"></div>`:`<h3>PIN-коды сотрудников</h3><p class="muted">Выдавать и менять PIN-коды может только владелец (Хозяйкин А. В.) под своим кодом.</p>`}
     <h3>Меню — <select id="mp" style="width:auto">${S.rms.map(r=>`<option value="${r.id}" ${r.id===S.menuRms?'selected':''}>${esc(r.name)}</option>`).join('')}</select>
       <span class="muted">${menu.items.length} позиций — меню и цены берутся из действующего прайс-листа iiko автоматически, ручные правки перезапишутся при синхронизации</span></h3>
     <p style="display:flex;gap:8px"><input id="mi_name" placeholder="Название (точно как в iiko!)" style="flex:2">
@@ -1113,6 +1115,7 @@ async function renderSettings(scr,bar){
   $('#btn_sync').onclick=act('/api/sync','Синхронизирую с iiko…');
   const ovDoc=await dbGetDoc('config/pin_overrides')||{items:{}};
   function drawEmp(){
+    if(!isOwner())return;
     const q=($('#emp_q').value||'').toLowerCase().trim();
     const rows=q?S.employees.filter(e=>e.name.toLowerCase().includes(q)).slice(0,15):[];
     $('#emp_list').innerHTML=rows.length?'<table><tbody>'+rows.map(e=>`<tr><td>${esc(e.name)}</td>
@@ -1122,14 +1125,14 @@ async function renderSettings(scr,bar){
       const pin=i.value.trim();
       const emp=S.employees.find(e=>e.id===i.dataset.ep);if(emp)emp.pin=pin;
       $('#pin_msg').textContent='Сохраняю…';
-      try{const r=await fetch('/api/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:i.dataset.ep,pin})}).then(x=>x.json());
+      try{const r=await fetch('/api/pins',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:i.dataset.ep,pin,by:S.user&&S.user.id})}).then(x=>x.json());
         $('#pin_msg').textContent=r.result||r.error||'готово';
         if(r.shared){ovDoc.items=ovDoc.items||{};delete ovDoc.items[i.dataset.ep];}
         else{ovDoc.items=ovDoc.items||{};ovDoc.items[i.dataset.ep]=pin;}
       }catch(e){ovDoc.items=ovDoc.items||{};ovDoc.items[i.dataset.ep]=pin;dbSetDoc('config/pin_overrides',ovDoc);$('#pin_msg').textContent='Сохранено только на этом компьютере';}
     });
   }
-  $('#emp_q').oninput=drawEmp;drawEmp();
+  if(isOwner()){$('#emp_q').oninput=drawEmp;drawEmp();}
   const chk=(v,l,w)=>{if(v&&!l.includes(v))alert('Внимание: «'+v+'» нет в справочнике '+w+' iiko — акт реализации не пройдёт.');};
   scr.querySelectorAll('[data-fn]').forEach(i=>i.onchange=()=>{frontById(i.dataset.fn).name=i.value.trim();saveStructure();});
   scr.querySelectorAll('[data-fr]').forEach(s=>s.onchange=()=>{frontById(s.dataset.fr).rmsId=s.value;saveStructure();});

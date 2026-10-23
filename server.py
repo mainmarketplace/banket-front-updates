@@ -25,6 +25,7 @@ FROZEN = getattr(sys, "frozen", False)
 BASE = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE, "version.txt")
 UPDATABLE = ("server.py", "front.html", "front.ico", "favicon.png")
+OWNER_ID = "5d1a33e6-028e-4f2d-9939-0e764f515581"  # Хозяйкин А. В. — только он выдаёт PIN-коды
 UPDATING = [False]  # идёт установка обновления — code_watcher не перезапускает сам
 ICON_PATH = os.path.join(BASE, "front.ico")
 CONFIG_PATH = os.path.join(BASE, "config.json")
@@ -1073,6 +1074,8 @@ class Handler(BaseHTTPRequestHandler):
                 emp_id, pin = body.get("id") or "", str(body.get("pin") or "").strip()
                 if not emp_id:
                     return self._send(400, '{"error":"нет id сотрудника"}')
+                if (body.get("by") or "") not in CFG.get("pin_admins", [OWNER_ID]):
+                    return self._send(403, json.dumps({"error": "PIN-коды выдаёт только владелец"}, ensure_ascii=False))
                 try:
                     shared = set_shared_pin(emp_id, pin)
                     ov = doc_get("config/pin_overrides") or {"items": {}}
