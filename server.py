@@ -25,6 +25,7 @@ FROZEN = getattr(sys, "frozen", False)
 BASE = os.path.dirname(os.path.abspath(__file__))
 VERSION_PATH = os.path.join(BASE, "version.txt")
 UPDATABLE = ("server.py", "front.html", "front.ico", "favicon.png")
+UPDATING = [False]  # идёт установка обновления — code_watcher не перезапускает сам
 ICON_PATH = os.path.join(BASE, "front.ico")
 CONFIG_PATH = os.path.join(BASE, "config.json")
 DB_PATH = os.path.join(BASE, "banket.db")
@@ -341,6 +342,13 @@ def local_version():
 
 def check_update(force=False):
     """Проверяет обновление по update_url, скачивает и ставит файлы, затем перезапуск."""
+    try:
+        return _check_update(force)
+    except Exception:
+        UPDATING[0] = False
+        raise
+
+def _check_update(force=False):
     url = CFG.get("update_url")
     if not url:
         return "адрес обновлений не задан"
@@ -352,6 +360,7 @@ def check_update(force=False):
     if ver == local_version() and not force:
         return "установлена последняя версия " + ver
     changed = []
+    UPDATING[0] = True
     for name, info in (man.get("files") or {}).items():
         if name not in UPDATABLE:
             continue
@@ -376,6 +385,8 @@ def check_update(force=False):
     log("Обновление: " + res)
     if "server.py" in changed:
         threading.Timer(1.0, self_restart, args=("обновление " + ver,)).start()
+    else:
+        UPDATING[0] = False
     return res
 
 # ---------------- выпуск обновления в своё S3-хранилище (Timeweb) ----------------
@@ -1084,8 +1095,9 @@ class Handler(BaseHTTPRequestHandler):
 
 HTTPD = None
 def self_restart(reason):
-    """Перезапуск сервера тем же процессом-заменой (без участия пользователя)."""
+    """Перезапуск сервера: запускаем новую копию (она дождётся освобождения порта) и выходим."""
     log("Перезапуск сервера: " + reason)
+    import subprocess
     try:
         if HTTPD:
             HTTPD.server_close()
@@ -1093,12 +1105,11 @@ def self_restart(reason):
         pass
     try:
         args = [sys.executable] if FROZEN else [sys.executable, os.path.abspath(__file__)]
-        os.execv(sys.executable, args + ["--no-browser"])
+        flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(args + ["--no-browser", "--restarted"], cwd=BASE, close_fds=True, creationflags=flags)
     except Exception as e:
-        log("execv не удался (%s), пробую запуск копии" % e)
-        import subprocess
-        subprocess.Popen([sys.executable, os.path.abspath(__file__)], cwd=BASE)
-        os._exit(0)
+        log("Не удалось запустить новую копию: %s" % e)
+    os._exit(0)
 
 def code_watcher():
     """Следит за server.py и config.json: изменились — перезапуск сам."""
@@ -1112,6 +1123,9 @@ def code_watcher():
             except Exception:
                 continue
             if stamp.get(p) is not None and m != stamp[p]:
+                if UPDATING[0]:
+                    stamp[p] = m
+                    continue  # обновление само перезапустит сервер, когда скачает все файлы
                 time.sleep(1)  # дождаться окончания записи файла
                 self_restart("обновлён " + os.path.basename(p))
             stamp[p] = m
@@ -1181,6 +1195,12 @@ def main():
     global HTTPD
     port = int(CFG.get("port", 8100))
     no_browser = "--no-browser" in sys.argv
+    if "--restarted" in sys.argv:
+        # предыдущая копия ещё завершается — ждём, пока порт освободится (до 40 с)
+        for _ in range(80):
+            if not port_busy(port):
+                break
+            time.sleep(0.5)
     if port_busy(port):
         # сервер уже работает (автозапуск) — просто открыть окно фронта
         if not no_browser:
