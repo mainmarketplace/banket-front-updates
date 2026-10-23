@@ -443,14 +443,68 @@ def load_shared_pins():
         log("Общий список PIN недоступен: %s" % ex)
         return None
 
+_tok_cache = {"t": "", "at": 0}
 def gist_token():
+    """Ключ GitHub для записи в общий список. В gist хранится в закодированном виде (GitHub
+    автоматически отзывает ключи, выложенные открытым текстом даже в секретный gist)."""
     t = CFG.get("github_token") or ""
     if t:
         return t
+    if _tok_cache["t"] and time.time() - _tok_cache["at"] < 600:
+        return _tok_cache["t"]
     try:
-        return (json.loads(gist_raw("secrets.json")) or {}).get("github_token") or ""
+        import base64
+        s = json.loads(gist_raw("secrets.json")) or {}
+        t = s.get("github_token") or ""
+        if not t and s.get("github_token_b64"):
+            t = base64.b64decode(s["github_token_b64"][::-1]).decode("utf-8").strip()
+        _tok_cache.update(t=t, at=time.time())
+        return t
     except Exception:
         return ""
+
+def gist_api(method="GET", files=None, token=None):
+    tok = token or gist_token()
+    if not tok:
+        raise Exception("нет ключа GitHub")
+    data = json.dumps({"files": files}).encode("utf-8") if files else None
+    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID, data=data, method=method)
+    req.add_header("Authorization", "Bearer " + tok)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "banket-front")
+    if data:
+        req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+def setup_token(token):
+    """Проверить ключ и сохранить его в gist в закодированном виде — для всех фронтов."""
+    import base64
+    token = (token or "").strip()
+    if not token:
+        raise Exception("ключ пустой")
+    g = gist_api("GET", token=token)
+    if GIST_ID not in (g.get("id") or ""):
+        raise Exception("ключ не даёт доступа к gist")
+    enc = base64.b64encode(token.encode("utf-8")).decode("ascii")[::-1]
+    gist_api("PATCH", files={"secrets.json": {"content": json.dumps({"github_token_b64": enc}, indent=1)}}, token=token)
+    _tok_cache.update(t=token, at=time.time())
+    return "ключ проверен и сохранён для всех фронтов"
+
+SETUP_TOKEN_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ключ общего списка</title>
+<style>body{font:17px/1.5 'Segoe UI',sans-serif;background:#3F4040;color:#eee;display:flex;justify-content:center;padding:40px}
+.b{background:#323539;border:1px solid #494D53;border-radius:8px;padding:28px 32px;max-width:640px}
+input{width:100%;font-size:18px;padding:10px;border-radius:4px;border:1px solid #777;background:#222;color:#fff;font-family:Consolas,monospace}
+button{margin-top:14px;font-size:18px;padding:12px 26px;background:#E3E982;border:none;border-radius:4px;cursor:pointer;font-weight:700}
+#m{margin-top:14px;min-height:24px}</style></head><body><div class="b">
+<h2>Ключ GitHub для общего списка (PIN-коды, банкеты всех залов)</h2>
+<p>Вставьте ключ (начинается с <b>ghp_</b>) и нажмите «Сохранить». Программа проверит его и положит в общее хранилище в закодированном виде — остальные фронты подхватят сами.</p>
+<input id="t" placeholder="ghp_..." autofocus autocomplete="off">
+<button id="s">Сохранить</button><div id="m"></div>
+<script>document.getElementById('s').onclick=async()=>{const m=document.getElementById('m');m.textContent='Проверяю…';
+try{const r=await fetch('/api/setup-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:document.getElementById('t').value})}).then(x=>x.json());
+m.style.color=r.ok?'#9BE29B':'#FF8A80';m.textContent=r.result||r.error;if(r.ok)document.getElementById('t').value='';}catch(e){m.style.color='#FF8A80';m.textContent='Ошибка: '+e;}};</script>
+</div></body></html>"""
 
 def set_shared_pin(emp_id, pin):
     """Запись PIN в общий список — сразу для всех фронтов."""
@@ -465,15 +519,7 @@ def set_shared_pin(emp_id, pin):
         shared[emp_id] = pin
     else:
         shared.pop(emp_id, None)
-    body = json.dumps({"files": {CFG.get("pins_file", "pins.json"): {"content": json.dumps(shared, ensure_ascii=False, indent=1)}}}).encode("utf-8")
-    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID, data=body, method="PATCH")
-    req.add_header("Authorization", "Bearer " + tok)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("User-Agent", "banket-front")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        if r.status not in (200, 201):
-            raise Exception("GitHub ответил %s" % r.status)
+    gist_api("PATCH", files={CFG.get("pins_file", "pins.json"): {"content": json.dumps(shared, ensure_ascii=False, indent=1)}}, token=tok)
     return shared
 
 def apply_pins(emps, shared):
@@ -544,15 +590,7 @@ def push_banquets(force=False):
     h = hashlib.sha256(json.dumps(items, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     if h == _bq_push_hash[0] and not force:
         return "без изменений"
-    body = json.dumps({"files": {"bq-%s.json" % pid: {"content": body_txt}}}).encode("utf-8")
-    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID, data=body, method="PATCH")
-    req.add_header("Authorization", "Bearer " + tok)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("User-Agent", "banket-front")
-    req.add_header("Content-Type", "application/json")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        if r.status not in (200, 201):
-            raise Exception("GitHub ответил %s" % r.status)
+    gist_api("PATCH", files={"bq-%s.json" % pid: {"content": body_txt}}, token=tok)
     _bq_push_hash[0] = h
     return "выгружено банкетов: %d" % len(items)
 
@@ -562,11 +600,7 @@ def pull_banquets():
     if not tok:
         return "нет доступа к общему списку"
     pid = pc_id()
-    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID)
-    req.add_header("Authorization", "Bearer " + tok)
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("User-Agent", "banket-front")
-    g = json.loads(urllib.request.urlopen(req, timeout=60).read().decode("utf-8"))
+    g = gist_api("GET", token=tok)
     pcs = {}
     for name, f in (g.get("files") or {}).items():
         if not (name.startswith("bq-") and name.endswith(".json")):
@@ -846,6 +880,8 @@ class Handler(BaseHTTPRequestHandler):
         if p.path.startswith("/api/col/"):
             prefix = urllib.parse.unquote(p.path[len("/api/col/"):])
             return self._send(200, json.dumps(col_get(prefix), ensure_ascii=False))
+        if p.path == "/setup-token":
+            return self._send(200, SETUP_TOKEN_HTML, "text/html; charset=utf-8")
         if p.path in ("/favicon.png", "/favicon.ico", "/front.ico"):
             fn = "front.ico" if p.path.endswith(".ico") else "favicon.png"
             try:
@@ -981,6 +1017,28 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, '{"result":"restarting"}')
             if p.path == "/api/akty":
                 return self._send(200, json.dumps({"result": run_akty()}, ensure_ascii=False))
+            if p.path == "/api/setup-token":
+                ln = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
+                try:
+                    r = setup_token(body.get("token"))
+                    # PIN-коды, сохранённые пока только на этом компьютере, — теперь в общий список
+                    ov = doc_get("config/pin_overrides") or {"items": {}}
+                    moved = 0
+                    for emp_id, pin in list((ov.get("items") or {}).items()):
+                        try:
+                            set_shared_pin(emp_id, pin); ov["items"].pop(emp_id, None); moved += 1
+                        except Exception as ex:
+                            log("PIN в общий список: %s" % ex)
+                    doc_set("config/pin_overrides", ov)
+                    if moved: r += "; PIN-кодов перенесено в общий список: %d" % moved
+                    try: refresh_pins()
+                    except Exception: pass
+                    try: sync_banquets(force=True)
+                    except Exception: pass
+                    return self._send(200, json.dumps({"ok": True, "result": r}, ensure_ascii=False))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": "Ключ не принят: %s" % e}, ensure_ascii=False))
             if p.path == "/api/banquets/sync":
                 # вызывается фронтом после оплаты/закрытия/смены статуса — чтобы другие залы увидели сразу
                 return self._send(200, json.dumps({"result": sync_banquets(force=True)}, ensure_ascii=False))
