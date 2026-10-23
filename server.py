@@ -447,9 +447,17 @@ def gist_raw(name, timeout=30):
     return urllib.request.urlopen(url, timeout=timeout).read().decode("utf-8-sig")
 
 def load_shared_pins():
-    """Общий список PIN всех фронтов: {id сотрудника: pin}. iiko не отдаёт PIN-коды по API."""
+    """Общий список PIN всех фронтов: {id сотрудника: pin}. iiko не отдаёт PIN-коды по API.
+    При наличии ключа читаем через API (без кэша), иначе — по raw-ссылке."""
+    name = CFG.get("pins_file", "pins.json")
     try:
-        return json.loads(gist_raw(CFG.get("pins_file", "pins.json"))) or {}
+        if gist_token():
+            f = (gist_api("GET").get("files") or {}).get(name) or {}
+            txt = f.get("content") or "{}"
+            if f.get("truncated") and f.get("raw_url"):
+                txt = urllib.request.urlopen(f["raw_url"], timeout=60).read().decode("utf-8")
+            return json.loads(txt) or {}
+        return json.loads(gist_raw(name)) or {}
     except Exception as ex:
         log("Общий список PIN недоступен: %s" % ex)
         return None
@@ -517,8 +525,13 @@ try{const r=await fetch('/api/setup-token',{method:'POST',headers:{'Content-Type
 m.style.color=r.ok?'#9BE29B':'#FF8A80';m.textContent=r.result||r.error;if(r.ok)document.getElementById('t').value='';}catch(e){m.style.color='#FF8A80';m.textContent='Ошибка: '+e;}};</script>
 </div></body></html>"""
 
+_pin_lock = threading.Lock()
 def set_shared_pin(emp_id, pin):
-    """Запись PIN в общий список — сразу для всех фронтов."""
+    """Запись PIN в общий список — сразу для всех фронтов (по одному, без гонок)."""
+    with _pin_lock:
+        return _set_shared_pin(emp_id, pin)
+
+def _set_shared_pin(emp_id, pin):
     tok = gist_token()
     if not tok:
         raise Exception("нет доступа к общему списку PIN — код сохранён только на этом компьютере")
