@@ -503,6 +503,101 @@ def refresh_pins(shared=None):
     doc_set("config/employees", doc)
     return "PIN обновлены: %d" % len([e for e in emps if e.get("pin")])
 
+# ---------------- общий список банкетов всех залов ----------------
+def pc_id():
+    d = doc_get("config/pc") or {}
+    if not d.get("id"):
+        import uuid
+        d = {"id": uuid.uuid4().hex[:12], "host": _socket.gethostname()}
+        doc_set("config/pc", d)
+    return d["id"]
+
+def bq_summary(b, bid):
+    c = b.get("client") or {}
+    sub = sum(float(i.get("price") or 0) * float(i.get("qty") or 0) for i in b.get("items", []))
+    paid = sum(float(p.get("amount") or 0) for p in b.get("payments", []))
+    return {"id": bid, "num": b.get("num"), "date": b.get("date"), "time": b.get("time"),
+            "frontId": b.get("frontId"), "status": b.get("status"), "iikoStatus": b.get("iikoStatus"),
+            "closedAt": b.get("closedAt"), "client": {"name": c.get("name"), "phone": c.get("phone"), "guests": c.get("guests")},
+            "guests": c.get("guests"), "total": bq_totals(b), "paid": round(paid, 2), "sub": round(sub, 2),
+            "comment": (b.get("comment") or "")[:120]}
+
+_bq_push_hash = [""]
+def push_banquets(force=False):
+    """Выгрузить сводку банкетов этого компьютера в общий список (файл bq-<pc>.json в gist)."""
+    tok = gist_token()
+    if not tok:
+        return "нет доступа к общему списку"
+    pid = pc_id()
+    fronts = {f["id"]: f.get("name") for f in ((doc_get("config/structure") or {}).get("fronts") or [])}
+    items = []
+    for x in col_get("banquets"):
+        b = x.get("data") or {}
+        if not b.get("date"):
+            continue
+        s = bq_summary(b, x["id"])
+        s["frontName"] = fronts.get(s["frontId"], "")
+        items.append(s)
+    items.sort(key=lambda s: (s["date"] or "", s["time"] or ""))
+    payload = {"pc": pid, "host": _socket.gethostname(), "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"), "items": items}
+    body_txt = json.dumps(payload, ensure_ascii=False, indent=0)
+    h = hashlib.sha256(json.dumps(items, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    if h == _bq_push_hash[0] and not force:
+        return "без изменений"
+    body = json.dumps({"files": {"bq-%s.json" % pid: {"content": body_txt}}}).encode("utf-8")
+    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID, data=body, method="PATCH")
+    req.add_header("Authorization", "Bearer " + tok)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "banket-front")
+    req.add_header("Content-Type", "application/json")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        if r.status not in (200, 201):
+            raise Exception("GitHub ответил %s" % r.status)
+    _bq_push_hash[0] = h
+    return "выгружено банкетов: %d" % len(items)
+
+def pull_banquets():
+    """Скачать сводки банкетов остальных компьютеров → doc shared/banquets."""
+    tok = gist_token()
+    if not tok:
+        return "нет доступа к общему списку"
+    pid = pc_id()
+    req = urllib.request.Request("https://api.github.com/gists/" + GIST_ID)
+    req.add_header("Authorization", "Bearer " + tok)
+    req.add_header("Accept", "application/vnd.github+json")
+    req.add_header("User-Agent", "banket-front")
+    g = json.loads(urllib.request.urlopen(req, timeout=60).read().decode("utf-8"))
+    pcs = {}
+    for name, f in (g.get("files") or {}).items():
+        if not (name.startswith("bq-") and name.endswith(".json")):
+            continue
+        try:
+            txt = f.get("content")
+            if f.get("truncated") and f.get("raw_url"):
+                txt = urllib.request.urlopen(f["raw_url"], timeout=60).read().decode("utf-8")
+            d = json.loads(txt)
+        except Exception as ex:
+            log("Общий список банкетов, файл %s: %s" % (name, ex))
+            continue
+        if d.get("pc") == pid:
+            continue
+        try:  # брошенные файлы (компьютер переустановлен) старше 30 дней не показываем
+            age = datetime.datetime.now() - datetime.datetime.fromisoformat(d.get("updatedAt"))
+            if age.days > 30:
+                continue
+        except Exception:
+            pass
+        pcs[d.get("pc") or name] = d
+    doc_set("shared/banquets", {"pcs": pcs, "updatedAt": datetime.datetime.now().isoformat(timespec="seconds")})
+    n = sum(len(p.get("items") or []) for p in pcs.values())
+    return "компьютеров: %d, банкетов: %d" % (len(pcs), n)
+
+def sync_banquets(force=False):
+    r1 = push_banquets(force)
+    r2 = pull_banquets()
+    SYNC_STATE["banquets"] = "%s; %s" % (r1, r2)
+    return SYNC_STATE["banquets"]
+
 def sync_employees():
     """Тянет сотрудников из iiko, PIN — из общего списка (iiko не отдаёт PIN-коды по API)."""
     ii = Iiko(CFG)
@@ -675,6 +770,7 @@ def scheduler():
     last_price_sync = 0
     last_update_check = 0
     last_pins = 0
+    last_bq = 0
     while True:
         try:
             now = datetime.datetime.now()
@@ -682,6 +778,10 @@ def scheduler():
                 last_pins = time.time()
                 try: refresh_pins()
                 except Exception as e: log("Обновление PIN: %s" % e)
+            if time.time() - last_bq > float(CFG.get("banquets_sync_min", 3)) * 60:
+                last_bq = time.time()
+                try: sync_banquets()
+                except Exception as e: log("Общий список банкетов: %s" % e)
             if CFG.get("iiko_login") and CFG.get("iiko_password"):
                 if time.time() - last_price_sync > float(CFG.get("menu_sync_hours", 6)) * 3600:
                     last_price_sync = time.time()
@@ -881,6 +981,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, '{"result":"restarting"}')
             if p.path == "/api/akty":
                 return self._send(200, json.dumps({"result": run_akty()}, ensure_ascii=False))
+            if p.path == "/api/banquets/sync":
+                # вызывается фронтом после оплаты/закрытия/смены статуса — чтобы другие залы увидели сразу
+                return self._send(200, json.dumps({"result": sync_banquets(force=True)}, ensure_ascii=False))
             if p.path == "/api/pins":
                 # PIN сотрудника из настроек фронта → общий список для всех фронтов
                 ln = int(self.headers.get("Content-Length", 0))

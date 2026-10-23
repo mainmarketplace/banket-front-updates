@@ -244,7 +244,7 @@ async function dbGetCol(p){if(!db)return[];try{return unwrapCol(await db.collect
 /* ================= состояние ================= */
 const S={
   screen:'home', rms:[],fronts:[],conceptions:[],stores:[],menus:{},banquets:[],shifts:[],
-  listDate:todayISO(), listFilter:'act', listMode:'day', monthFilter:'overdue', closedDate:todayISO(),
+  listDate:todayISO(), listFilter:'act', listMode:'day', monthFilter:'overdue', remote:[], remoteAt:null, closedDate:todayISO(),
   editingId:null, cat:null, selItem:null, frontId:null,
   employees:[], user:null
 };
@@ -280,6 +280,8 @@ function shiftNum(fid){return S.shifts.filter(x=>x.data.frontId===fid).length;}
   }
   S.banquets=await dbGetCol('banquets');
   S.shifts=await dbGetCol('shifts');
+  await loadRemote();
+  setInterval(async()=>{const n=(S.remote||[]).length,a=S.remoteAt;await loadRemote();if((S.remote.length!==n||S.remoteAt!==a)&&['list','home'].includes(S.screen))render();},30000);
   if(!S.frontId&&S.fronts.length)S.frontId=S.fronts[0].id;
   render();
   try{
@@ -292,6 +294,7 @@ function saveStructure(){dbSetDoc('config/structure',{rms:S.rms,fronts:S.fronts,
 
 /* ================= расчёты ================= */
 function bqTotals(b){
+  if(b._remote){const total=num(b.total),paid=num(b.paid);return {sub:num(b.sub),service:0,discount:0,total,paid,rest:Math.round((total-paid)*100)/100};}
   const sub=(b.items||[]).reduce((s,i)=>s+num(i.price)*num(i.qty),0);
   const service=sub*num(b.servicePct)/100;
   const discount=sub*num(b.discountPct)/100+num(b.discountRub);
@@ -301,8 +304,29 @@ function bqTotals(b){
 }
 function curBq(){const x=S.banquets.find(x=>x.id===S.editingId);return x?x.data:null;}
 let saveTimer=null;
+let shareTimer=null;
+function shareBanquets(){clearTimeout(shareTimer);shareTimer=setTimeout(()=>{try{fetch('/api/banquets/sync',{method:'POST'}).catch(()=>{});}catch(e){}},3000);}
 function saveBq(b,now){b.updatedAt=new Date().toISOString();clearTimeout(saveTimer);
-  if(now){dbSetDoc('banquets/'+b.id,b);}else saveTimer=setTimeout(()=>dbSetDoc('banquets/'+b.id,b),400);}
+  if(now){dbSetDoc('banquets/'+b.id,b).then(shareBanquets);}else saveTimer=setTimeout(()=>dbSetDoc('banquets/'+b.id,b).then(shareBanquets),400);}
+/* банкеты других залов (сводка из общего списка, только просмотр) */
+async function loadRemote(){
+  try{const d=await dbGetDoc('shared/banquets')||{};const out=[];
+    Object.values(d.pcs||{}).forEach(pc=>(pc.items||[]).forEach(b=>out.push({id:'r:'+pc.pc+':'+b.id,data:Object.assign({},b,{_remote:true,_host:pc.host,_pcUpdated:pc.updatedAt})})));
+    S.remote=out;S.remoteAt=d.updatedAt||null;}catch(e){}
+}
+function allBanquets(){const my=new Set(S.banquets.map(x=>x.id));return S.banquets.concat((S.remote||[]).filter(x=>!my.has(x.data.id)));}
+function bqFrontName(b){const f=bqFront(b);return (f&&f.name)||b.frontName||'—';}
+function remoteInfo(b){
+  modal(`<div class="imodal"><div class="mtitle">Банкет № ${esc(b.num||'')} — другой зал</div>
+    <div style="padding:16px 22px;font-size:17px;line-height:1.6">
+      Ведётся на компьютере <b>${esc(b._host||'')}</b>, зал <b>${esc(bqFrontName(b))}</b>.<br>
+      ${ruDate(b.date)} ${esc(b.time||'')} · ${esc(b.client&&b.client.name||'')}${b.client&&b.client.phone?' · т. '+esc(b.client.phone):''}${b.guests?' · гостей: '+esc(b.guests):''}<br>
+      Статус: <b>${b.status==='closed'?'Проведён':b.status==='cancelled'?'Снят':'Действует'}</b> · Сумма ${fmt0(num(b.total))} · внесено ${fmt0(num(b.paid))}<br>
+      ${b.comment?'<span class="muted">'+esc(b.comment)+'</span><br>':''}
+      <span class="muted">Данные на ${b._pcUpdated?ruDT(b._pcUpdated):'—'}. Изменить банкет можно только на том компьютере.</span></div>
+    <div class="mbtns"><button id="m_no">Закрыть</button></div></div>`);
+  $('#m_no').onclick=closeModal;
+}
 
 /* ================= каркас ================= */
 function render(){
@@ -427,8 +451,8 @@ function renderHome(scr,bar){
       <div class="hhead" style="background:#5B8DB8">ГОСТИ</div>
       <div class="hbody"><button class="wtile" id="h_bq">Банкеты и резервы</button>
         ${(()=>{const o=monthStats(monthOf(todayISO())).overdue;return o.length
-          ?`<button class="wtile" id="h_overdue" style="background:var(--red);color:#fff;font-weight:700">Не проведено прошедших банкетов: ${o.length}<br><small style="font-weight:400">выручка не попадёт в ОПиУ месяца — проведите до конца месяца</small></button>`
-          :`<button class="wtile" id="h_month">Банкеты месяца: все прошедшие проведены ✓</button>`;})()}</div>
+          ?`<button class="wtile" id="h_overdue" style="background:var(--red);color:#fff;font-weight:700">Не проведено прошедших банкетов (все залы): ${o.length}<br><small style="font-weight:400">выручка не попадёт в ОПиУ месяца — проведите до конца месяца</small></button>`
+          :`<button class="wtile" id="h_month">Банкеты месяца (все залы): все прошедшие проведены ✓</button>`;})()}</div>
     </div></div>
     <div class="hcol"><div class="hsec">
       <div class="hhead" style="background:var(--green)">СЕРВИС</div>
@@ -516,7 +540,7 @@ function lateText(b){
 /* Банкеты месяца: прошедшие, но не закрытые — выручка не попадёт в ОПиУ месяца, пока их не провести */
 function monthOf(iso){return (iso||'').slice(0,7);}
 function monthStats(ym){
-  const all=S.banquets.filter(x=>monthOf(x.data.date)===ym);
+  const all=allBanquets().filter(x=>monthOf(x.data.date)===ym);
   const today=todayISO();
   const g={overdue:[],upcoming:[],done:[],off:[]};
   all.forEach(x=>{const b=x.data;
@@ -561,7 +585,7 @@ function renderMonth(scr,bar){
       :`<td class="stat-neu" style="color:#2A7">Предстоит</td>`;
     return `<tr data-o="${x.id}"><td class="cnt">${esc(b.num||'')}</td>
     <td class="cnt"><b>${ruDate(b.date)}</b><br><small style="color:#888">${esc(b.time||'')}</small></td>${st}
-    <td>${esc((bqFront(b)||{}).name||'—')}</td>
+    <td>${esc(bqFrontName(b))}${b._remote?'<br><small style="color:#888">другой компьютер: '+esc(b._host||'')+'</small>':''}</td>
     <td>${esc(b.client&&b.client.name||'')}${b.client&&b.client.phone?'<br><small>т. '+esc(b.client.phone)+'</small>':''}</td>
     <td style="text-align:right">${fmt0(t.total)}</td>
     <td style="text-align:right;color:#2A7">${fmt0(t.paid)}</td>
@@ -574,14 +598,14 @@ function renderMonth(scr,bar){
   $('#mprev').onclick=()=>shiftMonth(-1);$('#mnext').onclick=()=>shiftMonth(1);
   $('#mday').onclick=()=>{S.listMode='day';render();};
   scr.querySelectorAll('[data-mf]').forEach(b=>b.onclick=()=>{S.monthFilter=b.dataset.mf;render();});
-  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
+  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{const id=r.dataset.o;if(id.startsWith('r:')){const x=S.remote.find(z=>z.id===id);if(x)remoteInfo(x.data);return;}S.editingId=id;go('card');});
   botbar(bar,[{a:'back',t:'Назад',ic:'‹'}]);
   bar._acts={back:()=>go('home')};
 }
 function renderList(scr,bar){
   if(S.listMode==='month'){renderMonth(scr,bar);return;}
   const d=S.listDate;
-  const all=S.banquets.filter(x=>x.data.date===d);
+  const all=allBanquets().filter(x=>x.data.date===d);
   const groups={act:[],started:[],late:[],done:[],off:[]};
   all.forEach(x=>{const st=bqState(x.data);(groups[st]||groups.act).push(x);});
   const F=S.listFilter;
@@ -617,8 +641,8 @@ function renderList(scr,bar){
       :`<td class="stat-neu" style="color:#2A7">Действует</td>`;
     return `<tr data-o="${x.id}"><td class="cnt">${esc(b.num||'')}</td>${stTd}
     <td class="cnt"><b>${esc(b.time||'—')}</b><br><small style="color:#888">${d===todayISO()?'Сегодня':''}</small></td>
-    <td>${esc((bqFront(b)||{}).name||'—')}${b.tableNum?': '+esc(b.tableNum):''}</td>
-    <td class="cnt">${esc(b.client&&b.client.guests||'')}</td>
+    <td>${esc(bqFrontName(b))}${b.tableNum?': '+esc(b.tableNum):''}${b._remote?'<br><small style="color:#888">другой компьютер: '+esc(b._host||'')+'</small>':''}</td>
+    <td class="cnt">${esc(b.client&&b.client.guests||b.guests||'')}</td>
     <td>${esc(b.client&&b.client.name||'')}${b.client&&b.client.phone?'<br><small>т. '+esc(b.client.phone)+'</small>':''}</td>
     <td style="text-align:right">${fmt0(t.total)}${t.paid?'<br><small style="color:#2A7">опл. '+fmt0(t.paid)+'</small>':''}</td>
     <td>${esc(b.comment||'')}</td></tr>`;}).join('')
@@ -629,7 +653,7 @@ function renderList(scr,bar){
   $('#dcal').onclick=calModal;
   $('#mmonth').onclick=()=>{S.listMode='month';S.monthFilter='overdue';render();};
   scr.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{S.listFilter=b.dataset.f;render();});
-  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
+  scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{const id=r.dataset.o;if(id.startsWith('r:')){const x=S.remote.find(z=>z.id===id);if(x)remoteInfo(x.data);return;}S.editingId=id;go('card');});
   botbar(bar,[{a:'back',t:'Назад',ic:'‹'},{a:'new',t:'Новый банкет',ic:'🍽',cls:'right accent'}]);
   bar._acts={back:()=>go('home'),new:newBanquet};
 }
@@ -640,7 +664,7 @@ function calModal(){
     let cells='';['пн','вт','ср','чт','пт','сб','вс'].forEach(x=>cells+=`<div style="color:#999;text-align:center;font-size:12px;padding:4px">${x}</div>`);
     for(let i=0;i<start;i++)cells+='<div></div>';
     for(let dn=1;dn<=dim;dn++){const iso=isoOf(new Date(y,m,dn));
-      const n=S.banquets.filter(b=>b.data.date===iso&&b.data.status!=='cancelled').length;
+      const n=allBanquets().filter(b=>b.data.date===iso&&b.data.status!=='cancelled').length;
       cells+=`<button class="wtile ${iso===S.listDate?'on':''}" data-dt="${iso}" style="padding:10px 4px">${dn}${n?`<br><small style="color:#C60">●${n}</small>`:''}</button>`;}
     modal(`<div class="imodal"><div class="mtitle">
       <button class="arr" id="c_p" style="background:none;border:none;color:#fff;font-size:24px;cursor:pointer">‹</button>
