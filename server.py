@@ -736,7 +736,7 @@ def run_akty(shift_id=None):
                 "<conceptionId>%s</conceptionId>"
                 "<comment>%s</comment>"
                 "<items>%s</items>"
-                "</document>") % (b.get("date"), store_id, conc_id, comment, "".join(items_xml))
+                "</document>") % (b.get("date"), store_id, conc_id, xml_escape(comment), "".join(items_xml))
             fn = os.path.join(LOG_DIR, "akt-%s-%s.xml" % (b.get("date"), x["id"][:8]))
             with open(fn, "w", encoding="utf-8") as f:
                 f.write(xml_body)
@@ -763,6 +763,11 @@ def run_akty(shift_id=None):
     return res
 
 # ---------------- оплаты для бухгалтерии (приходные кассовые ордера) ----------------
+PAY_METHODS = {"cash": "Наличные", "qr": "QR код", "otkr": "Открытие", "sber": "Сбербанк",
+               "acq": "Эквайринг", "account": "Безналичный расчет", "card": "Банковская карта"}
+def xml_escape(t):
+    return (str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
 def run_payments():
     """Выгружает новые предоплаты банкетов в iiko приходными кассовыми ордерами,
     чтобы бухгалтер видел оплаты в фин.модуле, как при работе через iikoFront."""
@@ -790,15 +795,19 @@ def run_payments():
             if not dep_id:
                 skipped.append("оплата %s: подразделение «%s» не найдено" % (p.get("id"), rms.get("iikoName")))
                 continue
-            comment = "Предоплата банкета №%s от %s, %s (%s)" % (
-                b.get("num", ""), b.get("date"), (b.get("client") or {}).get("name", ""), p.get("method"))
+            mname = PAY_METHODS.get(p.get("method"), p.get("method") or "")
+            comment = "Банкет №%s от %s, %s. %s: %s ₽, способ: %s. Принял(а): %s, фронт %s" % (
+                b.get("num", ""), b.get("date"), (b.get("client") or {}).get("name", ""),
+                "Оплата" if b.get("status") == "closed" else "Предоплата",
+                p.get("amount"), mname, p.get("by") or "—", fr.get("name", ""))
+            extra = "".join("<%s>%s</%s>" % (k, v, k) for k, v in ((CFG.get("pko_fields") or {}).get(p.get("method")) or {}).items())
             xml_body = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 "<document>"
                 "<dateIncoming>%s</dateIncoming>"
                 "<departmentId>%s</departmentId>"
                 "<sum>%s</sum>"
-                "<comment>%s</comment>"
-                "</document>") % (p.get("date"), dep_id, p.get("amount"), comment)
+                "<comment>%s</comment>%s"
+                "</document>") % (p.get("date"), dep_id, p.get("amount"), xml_escape(comment), extra)
             fn = os.path.join(LOG_DIR, "pko-%s-%s.xml" % (p.get("date"), str(p.get("id"))[:8]))
             with open(fn, "w", encoding="utf-8") as f:
                 f.write(xml_body)

@@ -391,6 +391,38 @@ function numpad(title,init,unit,cb,extras){
   $('#np_ok').onclick=()=>{const v=num(val);closeModal();cb(v);};
   $('#np_no').onclick=closeModal;
 }
+/* Подтверждение PIN-кодом сотрудника для денежных операций (как в iikoFront). cb(emp) — кто подтвердил. */
+function pinPrompt(title,cb,onCancel){
+  if(!pinRequired()){cb(S.user||{name:'',id:''});return;}
+  let buf='';
+  modal(`<div class="imodal" style="min-width:420px"><div class="mtitle">${esc(title)}</div>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:18px 22px 8px">
+      <div style="font-size:18px;color:#ddd">Введите PIN-код сотрудника</div>
+      <div id="pp_dots" style="display:flex;gap:14px;height:22px">${[0,1,2,3].map(i=>`<span data-dot="${i}" style="width:16px;height:16px;border-radius:50%;border:2px solid #999;display:inline-block"></span>`).join('')}</div>
+      <div id="pp_msg" style="color:var(--red);font-size:14px;height:18px"></div>
+      <div style="display:grid;grid-template-columns:repeat(3,100px);grid-auto-rows:72px;gap:2px;background:#B5B5B5;border:1px solid #B5B5B5">
+        ${[1,2,3,4,5,6,7,8,9].map(d=>`<button class="wtile" data-pk="${d}" style="font-size:26px;border:none;border-radius:0">${d}</button>`).join('')}
+        <button class="wtile" style="border:none;border-radius:0;background:#E9E9E9"></button>
+        <button class="wtile" data-pk="0" style="font-size:26px;border:none;border-radius:0">0</button>
+        <button class="wtile" data-pk="X" style="font-size:22px;border:none;border-radius:0">✕</button>
+      </div></div>
+    <div class="mbtns"><button id="pp_cancel">Отмена</button></div></div>`);
+  const dots=()=>$('#modal').querySelectorAll('[data-dot]').forEach((x,i)=>{x.style.background=i<buf.length?'#E3E982':'none';});
+  $('#modal').querySelectorAll('[data-pk]').forEach(b=>b.onclick=()=>{
+    const d=b.dataset.pk;
+    if(d==='X'){buf='';dots();return;}
+    if(buf.length>=4)return;
+    buf+=d;dots();
+    if(buf.length===4){
+      const emp=S.employees.find(e=>e.pin===buf);
+      setTimeout(()=>{
+        if(emp){closeModal();cb(emp);}
+        else{buf='';dots();const m=$('#pp_msg');if(m){m.textContent='Неверный PIN-код';setTimeout(()=>{if(m)m.textContent='';},1500);}}
+      },120);
+    }
+  });
+  $('#pp_cancel').onclick=()=>{closeModal();onCancel&&onCancel();};
+}
 function moneyPad(title,cb){
   numpad({t:title},'', 'р.',cb,['+1','+5','+10','+50','+100','+500','+1000','+5000']);
 }
@@ -897,7 +929,7 @@ function prepayModal(b,after){
     <div class="pp-sel">ВЫБРАННЫЙ ТИП: <b>${mName(method)}</b></div>
     <div class="paylist">
       Внесено ранее: ${fmt(t.paid)} · Остаток: ${fmt(Math.max(0,t.rest))}
-      ${(b.payments||[]).map(p=>`<div class="pl"><span>${mName(p.method)} · ${ruDate(p.date)}</span><span>${fmt(p.amount)}
+      ${(b.payments||[]).map(p=>`<div class="pl"><span>${mName(p.method)} · ${ruDate(p.date)}${p.by?' · принял(а): '+esc(p.by):''}${p.exported?' · <small style="color:#2A7">в iiko</small>':''}</span><span>${fmt(p.amount)}
         ${b.status==='closed'?'':`<button class="x" data-delp="${p.id}">✕</button>`}</span></div>`).join('')}
     </div>
     <div class="numwrap"><div class="numdisp"><div class="nd" id="pp_v">${val||'0,00 р.'}</div></div>
@@ -931,12 +963,21 @@ function prepayModal(b,after){
     $('#pp_add').onclick=()=>{
       const amount=num(val);
       if(amount<=0){return;}
-      b.payments.push({id:uid(),date:todayISO(),method,amount,ts:new Date().toISOString(),shiftId:sh.id,by:S.user?S.user.name:''});
-      saveBq(b,true);pushIiko('pko');val='';draw();after&&after();
+      const m0=method;
+      pinPrompt('ПРЕДОПЛАТА '+fmt0(amount)+' — '+mName(m0),emp=>{
+        b.payments.push({id:uid(),date:todayISO(),method:m0,amount,ts:new Date().toISOString(),shiftId:sh.id,by:emp.name||'',byId:emp.id||''});
+        saveBq(b,true);pushIiko('pko');val='';draw();after&&after();
+      },()=>draw());
     };
     $('#pp_close').onclick=()=>{closeModal();after&&after();};
     $('#modal').querySelectorAll('[data-delp]').forEach(x=>x.onclick=()=>{
-      iConfirm('Удалить предоплату?',()=>{b.payments=b.payments.filter(p=>p.id!==x.dataset.delp);saveBq(b,true);draw();after&&after();});
+      const pp=b.payments.find(p=>p.id===x.dataset.delp);
+      if(pp&&pp.exported){iConfirm('Эта оплата уже передана в iiko кассовым ордером. Удалить её здесь нельзя — возврат оформляется в iiko бухгалтером.',null,'Понятно','Закрыть');return;}
+      pinPrompt('УДАЛЕНИЕ ОПЛАТЫ '+fmt0(pp?pp.amount:0),emp=>{
+        iConfirm('Удалить предоплату '+fmt0(pp?pp.amount:0)+'?',()=>{b.payments=b.payments.filter(p=>p.id!==x.dataset.delp);
+          (b.paymentsDeleted=b.paymentsDeleted||[]).push(Object.assign({},pp,{deletedAt:new Date().toISOString(),deletedBy:emp.name||''}));
+          saveBq(b,true);draw();after&&after();});
+      },()=>draw());
     });
   };
   draw();
@@ -975,7 +1016,7 @@ function renderPay(scr,bar){
     </div>
     <div class="pay-right">
       <div class="pr-due"><span>К ОПЛАТЕ:</span><b>${fmt(Math.max(0,t.rest))}</b></div>
-      ${(b.payments||[]).map(p=>`<div class="paylist"><div class="pl"><span>ПРЕДОПЛАТА: ${mName(p.method).toUpperCase()}</span><b>${fmt(p.amount)}</b></div></div>`).join('')}
+      ${(b.payments||[]).map(p=>`<div class="paylist"><div class="pl"><span>ПРЕДОПЛАТА: ${mName(p.method).toUpperCase()}${p.by?' <small style="color:#777">· '+esc(p.by)+'</small>':''}</span><b>${fmt(p.amount)}</b></div></div>`).join('')}
       <div class="methrow">
         <button class="mt" id="pm_cash"><span class="ic">💵</span>Наличные</button>
         <button class="mt" id="pm_card"><span class="ic">💳</span>Банковские карты</button>
@@ -992,8 +1033,10 @@ function renderPay(scr,bar){
     if(b.status!=='active')return;
     const doAdd=(m)=>moneyPad('ВНЕСТИ: '+mName(m),v=>{
       if(v<=0)return;
-      b.payments.push({id:uid(),date:todayISO(),method:m,amount:v,ts:new Date().toISOString(),shiftId:sh.id,by:S.user?S.user.name:''});
-      saveBq(b,true);pushIiko('pko');render();
+      pinPrompt('ОПЛАТА '+fmt0(v)+' — '+mName(m),emp=>{
+        b.payments.push({id:uid(),date:todayISO(),method:m,amount:v,ts:new Date().toISOString(),shiftId:sh.id,by:emp.name||'',byId:emp.id||''});
+        saveBq(b,true);pushIiko('pko');render();
+      });
     });
     if(method==='card'){
       modal(`<div class="imodal"><div class="mtitle">ВЫБОР СПОСОБА ОПЛАТЫ</div>
