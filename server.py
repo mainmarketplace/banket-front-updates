@@ -914,6 +914,14 @@ class Handler(BaseHTTPRequestHandler):
         if p.path.startswith("/api/col/"):
             prefix = urllib.parse.unquote(p.path[len("/api/col/"):])
             return self._send(200, json.dumps(col_get(prefix), ensure_ascii=False))
+        if p.path == "/api/debug/log":
+            n = int((urllib.parse.parse_qs(p.query).get("n") or ["120"])[0])
+            try:
+                with open(os.path.join(LOG_DIR, "server.log"), encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()[-n:]
+            except Exception as e:
+                lines = ["нет лога: %s" % e]
+            return self._send(200, "".join(lines), "text/plain; charset=utf-8")
         if p.path == "/setup-token":
             return self._send(200, SETUP_TOKEN_HTML, "text/html; charset=utf-8")
         if p.path in ("/favicon.png", "/favicon.ico", "/front.ico"):
@@ -1131,7 +1139,10 @@ def self_restart(reason):
     try:
         args = [sys.executable] if FROZEN else [sys.executable, os.path.abspath(__file__)]
         flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(args + ["--no-browser", "--restarted"], cwd=BASE, close_fds=True, creationflags=flags)
+        errf = open(os.path.join(LOG_DIR, "restart-stderr.txt"), "ab")
+        subprocess.Popen(args + ["--no-browser", "--restarted"], cwd=BASE, close_fds=False,
+                         stdin=subprocess.DEVNULL, stdout=errf, stderr=errf, creationflags=flags)
+        log("Новая копия запущена, завершаю старую")
     except Exception as e:
         log("Не удалось запустить новую копию: %s" % e)
     os._exit(0)
@@ -1251,4 +1262,9 @@ def main():
     HTTPD.serve_forever()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as _e:
+        import traceback
+        log("КРИТИЧЕСКАЯ ОШИБКА: %s\n%s" % (_e, traceback.format_exc()))
+        raise
