@@ -111,6 +111,10 @@ td.stat-neu{text-align:center;font-size:13px;color:#666!important}
 /* меню справа */
 .menu-side{display:flex;flex-direction:column;overflow:hidden;gap:8px}
 .menu-nav{display:flex;gap:8px;align-items:center}
+.msearch{display:flex;align-items:center;background:#fff;border:1px solid #B5B5B5;flex:1;max-width:520px;height:46px}
+.msearch .ic{padding:0 10px;color:#777;font-size:18px}
+.msearch input{flex:1;border:none;outline:none;font-size:17px;height:100%;background:none;color:var(--ink)}
+.msearch button{border:none;background:none;color:#888;font-size:18px;padding:0 12px;cursor:pointer;height:100%}
 .menu-nav .nbtn{background:var(--dark-tile);border:none;color:#eee;font-size:20px;padding:12px 22px;cursor:pointer}
 .menu-body{flex:1;display:grid;grid-template-columns:280px 1fr;gap:8px;overflow:hidden}
 .cats{display:flex;flex-direction:column;gap:6px;overflow:auto}
@@ -794,7 +798,8 @@ async function renderOrder(scr,bar){
       <div class="menu-nav">
         <button class="nbtn" id="mn_back">←</button>
         <button class="nbtn" id="mn_home">⌂</button>
-        <div style="color:#ccc;font-size:14px;margin-left:auto">${esc(rms?rms.name:'')} · меню из iiko</div>
+        <div class="msearch"><span class="ic">🔍</span><input id="mn_q" placeholder="Поиск по меню (название, часть слова)" value="${esc(S.menuQ||'')}" ${locked?'disabled':''}><button id="mn_qx" title="Очистить">✕</button></div>
+        <div style="color:#ccc;font-size:14px;margin-left:auto;white-space:nowrap">${esc(rms?rms.name:'')} · меню из iiko</div>
       </div>
       <div class="menu-body">
         <div class="cats">${cats.map(c=>`<button class="cat ${c===S.cat?'on':''}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
@@ -817,9 +822,14 @@ async function renderOrder(scr,bar){
   }
   refreshCheck();
   const drawDishes=()=>{
-    const its=menu.items.filter(i=>(i.category||'Прочее')===S.cat);
+    const q=(S.menuQ||'').toLowerCase().trim();
+    const words=q.split(/\s+/).filter(Boolean);
+    const its=q?menu.items.filter(i=>{const n=(i.name||'').toLowerCase();return words.every(w=>n.includes(w));}).slice(0,200)
+               :menu.items.filter(i=>(i.category||'Прочее')===S.cat);
+    scr.querySelectorAll('.cats .cat').forEach(c=>c.classList.toggle('on',!q&&c.dataset.c===S.cat));
     const de=$('#dishes');
-    de.innerHTML=its.map(i=>`<button class="dish" data-d="${i.id}" ${locked?'disabled':''}>${esc(i.name)}<small>${i.freePrice||!num(i.price)?'свободная цена':fmt0(i.price)}</small></button>`).join('');
+    de.innerHTML=(its.length?its.map(i=>`<button class="dish" data-d="${i.id}" ${locked?'disabled':''}>${esc(i.name)}<small>${q?esc(i.category||'')+' · ':''}${i.freePrice||!num(i.price)?'свободная цена':fmt0(i.price)}</small></button>`).join('')
+      :`<div style="color:#bbb;padding:20px;grid-column:1/-1">Ничего не найдено по «${esc(S.menuQ)}»</div>`);
     de.querySelectorAll('[data-d]').forEach(el=>el.onclick=()=>{
       const it=menu.items.find(i=>i.id===el.dataset.d);
       const addIt=(price)=>{
@@ -833,8 +843,11 @@ async function renderOrder(scr,bar){
     });
   };
   drawDishes();
-  scr.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{S.cat=el.dataset.c;
+  scr.querySelectorAll('[data-c]').forEach(el=>el.onclick=()=>{S.cat=el.dataset.c;S.menuQ='';$('#mn_q').value='';
     scr.querySelectorAll('.cat').forEach(x=>x.classList.toggle('on',x===el));drawDishes();});
+  $('#mn_q').oninput=e=>{S.menuQ=e.target.value;drawDishes();};
+  $('#mn_q').onkeydown=e=>{if(e.key==='Escape'){S.menuQ='';e.target.value='';drawDishes();}};
+  $('#mn_qx').onclick=()=>{S.menuQ='';$('#mn_q').value='';drawDishes();$('#mn_q').focus();};
   $('#mn_back').onclick=()=>go('card');
   $('#mn_home').onclick=()=>go('home');
   const sel=()=>b.items.find(i=>i.id===S.selItem);
