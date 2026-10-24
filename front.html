@@ -153,7 +153,9 @@ td.stat-neu{text-align:center;font-size:13px;color:#666!important}
 .paymeth{display:flex;flex-direction:column;gap:2px;padding:10px 24px}
 .paymeth button{background:#fff;border:none;padding:18px;font-size:17px;cursor:pointer}
 /* оплата заказа */
-.pay-wrap{display:grid;grid-template-columns:1fr 1fr;gap:10px;height:100%}
+.pay-wrap{display:grid;grid-template-columns:1fr 1fr;gap:10px;flex:1;min-height:0}
+.screen:has(>.pay-wrap){display:flex;flex-direction:column}
+.pay-right .paybtn{flex-shrink:0}
 .pay-left{background:var(--tile);color:var(--ink);overflow:auto}
 .pay-left .ph{padding:10px 14px;font-weight:600;font-size:18px;border-bottom:1px solid #ddd}
 .pay-left .itot{display:flex;justify-content:space-between;padding:8px 14px;font-size:15px;border-bottom:1px solid #eee}
