@@ -1155,32 +1155,25 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, '{"error":"not found"}')
 
 HTTPD = None
+RESTART = {"reason": ""}
 def self_restart(reason):
-    """Перезапуск сервера: запускаем новую копию (она дождётся освобождения порта) и выходим."""
+    """Перезапуск: останавливаем serve_forever, дальше main() сам запустит новую копию и выйдет."""
     log("Перезапуск сервера: " + reason)
-    import subprocess
+    RESTART["reason"] = reason
     try:
         if HTTPD:
-            HTTPD.server_close()
-    except Exception:
-        pass
-    try:
-        args = [sys.executable] if FROZEN else [sys.executable, os.path.abspath(__file__)]
-        args += ["--no-browser", "--restarted"]
-        errf = open(os.path.join(LOG_DIR, "restart-stderr.txt"), "ab")
-        if os.name == "nt":
-            # через cmd с задержкой 2 с: новая копия стартует уже после выхода старой,
-            # без унаследованных сокетов/дескрипторов
-            cmdline = 'ping -n 3 127.0.0.1 >nul & start "" /b ' + " ".join('"%s"' % a for a in args)
-            subprocess.Popen(["cmd", "/c", cmdline], cwd=BASE, close_fds=True,
-                             stdin=subprocess.DEVNULL, stdout=errf, stderr=errf,
-                             creationflags=0x08000000 | 0x00000008)  # CREATE_NO_WINDOW | DETACHED_PROCESS
-        else:
-            subprocess.Popen(args, cwd=BASE, close_fds=True, stdin=subprocess.DEVNULL, stdout=errf, stderr=errf)
-        log("Новая копия поставлена на запуск, завершаю старую")
+            threading.Thread(target=HTTPD.shutdown, daemon=True).start()
     except Exception as e:
-        log("Не удалось запустить новую копию: %s" % e)
-    os._exit(0)
+        log("shutdown: %s" % e)
+        os._exit(0)
+
+def spawn_new_copy():
+    import subprocess
+    args = [sys.executable] if FROZEN else [sys.executable, os.path.abspath(__file__)]
+    args += ["--no-browser", "--restarted"]
+    flags = 0x00000008 if os.name == "nt" else 0  # DETACHED_PROCESS
+    subprocess.Popen(args, cwd=BASE, close_fds=True, creationflags=flags)
+    log("Новая копия запущена, завершаю старую")
 
 def code_watcher():
     """Следит за server.py и config.json: изменились — перезапуск сам."""
@@ -1301,7 +1294,20 @@ def main():
             time.sleep(1)
     if not no_browser:
         threading.Timer(1.5, open_front_window).start()
-    HTTPD.serve_forever()
+    try:
+        HTTPD.serve_forever()
+    except OSError as e:
+        log("serve_forever прерван: %s" % e)
+    try:
+        HTTPD.server_close()
+    except Exception:
+        pass
+    if RESTART["reason"]:
+        try:
+            spawn_new_copy()
+        except Exception as e:
+            log("Не удалось запустить новую копию: %s" % e)
+    os._exit(0)
 
 if __name__ == "__main__":
     try:
