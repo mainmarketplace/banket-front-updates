@@ -547,6 +547,30 @@ def _set_shared_pin(emp_id, pin):
     gist_api("PATCH", files={CFG.get("pins_file", "pins.json"): {"content": json.dumps(shared, ensure_ascii=False, indent=1)}}, token=tok)
     return shared
 
+SHARED = {"settings": {}, "at": 0}
+def load_shared_settings():
+    """Общие настройки всех фронтов (settings.json в gist): dry_run и т.п. Управляются централизованно."""
+    try:
+        f = (gist_api("GET").get("files") or {}).get("settings.json") or {}
+        d = json.loads(f.get("content") or "{}") or {}
+        if d != SHARED["settings"]:
+            log("Общие настройки: %s" % json.dumps(d, ensure_ascii=False))
+        SHARED["settings"] = d
+        SHARED["at"] = time.time()
+        doc_set("config/shared_settings", d)
+    except Exception as ex:
+        if not SHARED["settings"]:
+            SHARED["settings"] = doc_get("config/shared_settings") or {}
+        log("Общие настройки недоступны: %s" % ex)
+    return SHARED["settings"]
+
+def dry_run():
+    """Боевой режим включается централизованно (settings.json), иначе — config.json этого компьютера."""
+    st = SHARED["settings"] or (doc_get("config/shared_settings") or {})
+    if "dry_run" in st:
+        return bool(st["dry_run"])
+    return bool(CFG.get("dry_run", True))
+
 def apply_pins(emps, shared):
     for e in emps:
         e["pin"] = ""
@@ -696,7 +720,7 @@ def run_akty(shift_id=None):
     st = doc_get("config/structure") or {}
     rms_by_id = {r["id"]: r for r in st.get("rms", [])}
     front_by_id = {f["id"]: f for f in st.get("fronts", [])}
-    dry = bool(CFG.get("dry_run", True))
+    dry = dry_run()
     ii = Iiko(CFG)
     done, skipped = 0, []
     try:
@@ -781,7 +805,7 @@ def run_payments():
                 todo.append((x, p))
     if not todo:
         return "новых оплат нет"
-    dry = bool(CFG.get("dry_run", True))
+    dry = dry_run()
     ii = Iiko(CFG)
     done, skipped = 0, []
     try:
@@ -846,6 +870,8 @@ def scheduler():
                 last_pins = time.time()
                 try: refresh_pins()
                 except Exception as e: log("Обновление PIN: %s" % e)
+                try: load_shared_settings()
+                except Exception as e: log("Общие настройки: %s" % e)
             if time.time() - last_bq > float(CFG.get("banquets_sync_min", 3)) * 60:
                 last_bq = time.time()
                 try: sync_banquets()
@@ -1002,7 +1028,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False))
         if p.path == "/api/status":
             return self._send(200, json.dumps({
-                "dry_run": CFG.get("dry_run", True),
+                "dry_run": dry_run(),
                 "iiko_configured": bool(CFG.get("iiko_login") and CFG.get("iiko_password")),
                 "version": local_version(),
                 **SYNC_STATE}, ensure_ascii=False))
@@ -1261,8 +1287,12 @@ def main():
     log("Банкетный фронт запущен: http://localhost:%d" % port)
     if not (CFG.get("iiko_login") and CFG.get("iiko_password")):
         log("ВНИМАНИЕ: iiko_login/iiko_password не заполнены в config.json — синк цен и акты отключены.")
-    if CFG.get("dry_run", True):
+    try: load_shared_settings()
+    except Exception: pass
+    if dry_run():
         log("Режим DRY-RUN: акты формируются в файлы logs/akt-*.xml, но в iiko НЕ отправляются.")
+    else:
+        log("БОЕВОЙ РЕЖИМ: акты реализации и кассовые ордера отправляются в iiko.")
     for attempt in range(20):  # порт может освобождаться пару секунд после перезапуска
         try:
             HTTPD = ThreadingHTTPServer(("127.0.0.1", port), Handler)
