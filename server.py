@@ -915,9 +915,11 @@ class Handler(BaseHTTPRequestHandler):
             prefix = urllib.parse.unquote(p.path[len("/api/col/"):])
             return self._send(200, json.dumps(col_get(prefix), ensure_ascii=False))
         if p.path == "/api/debug/log":
-            n = int((urllib.parse.parse_qs(p.query).get("n") or ["120"])[0])
+            qq = urllib.parse.parse_qs(p.query)
+            n = int((qq.get("n") or ["120"])[0])
+            fname = os.path.basename((qq.get("f") or ["server.log"])[0])
             try:
-                with open(os.path.join(LOG_DIR, "server.log"), encoding="utf-8", errors="replace") as f:
+                with open(os.path.join(LOG_DIR, fname), encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()[-n:]
             except Exception as e:
                 lines = ["нет лога: %s" % e]
@@ -1138,11 +1140,18 @@ def self_restart(reason):
         pass
     try:
         args = [sys.executable] if FROZEN else [sys.executable, os.path.abspath(__file__)]
-        flags = 0x00000008 | 0x00000200 if os.name == "nt" else 0  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+        args += ["--no-browser", "--restarted"]
         errf = open(os.path.join(LOG_DIR, "restart-stderr.txt"), "ab")
-        subprocess.Popen(args + ["--no-browser", "--restarted"], cwd=BASE, close_fds=False,
-                         stdin=subprocess.DEVNULL, stdout=errf, stderr=errf, creationflags=flags)
-        log("Новая копия запущена, завершаю старую")
+        if os.name == "nt":
+            # через cmd с задержкой 2 с: новая копия стартует уже после выхода старой,
+            # без унаследованных сокетов/дескрипторов
+            cmdline = 'ping -n 3 127.0.0.1 >nul & start "" /b ' + " ".join('"%s"' % a for a in args)
+            subprocess.Popen(["cmd", "/c", cmdline], cwd=BASE, close_fds=True,
+                             stdin=subprocess.DEVNULL, stdout=errf, stderr=errf,
+                             creationflags=0x08000000 | 0x00000008)  # CREATE_NO_WINDOW | DETACHED_PROCESS
+        else:
+            subprocess.Popen(args, cwd=BASE, close_fds=True, stdin=subprocess.DEVNULL, stdout=errf, stderr=errf)
+        log("Новая копия поставлена на запуск, завершаю старую")
     except Exception as e:
         log("Не удалось запустить новую копию: %s" % e)
     os._exit(0)
@@ -1232,11 +1241,14 @@ def main():
     port = int(CFG.get("port", 8100))
     no_browser = "--no-browser" in sys.argv
     if "--restarted" in sys.argv:
-        # предыдущая копия ещё завершается — ждём, пока порт освободится (до 40 с)
-        for _ in range(80):
+        # предыдущая копия ещё завершается — ждём, пока порт освободится (до 90 с)
+        log("Новая копия после перезапуска: жду освобождения порта %d" % port)
+        for _ in range(180):
             if not port_busy(port):
                 break
             time.sleep(0.5)
+        else:
+            log("Порт %d так и не освободился — выхожу" % port)
     if port_busy(port):
         # сервер уже работает (автозапуск) — просто открыть окно фронта
         if not no_browser:
