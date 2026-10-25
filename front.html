@@ -315,7 +315,7 @@ async function loadMargins(){if(!S.margins)S.margins=(await dbGetDoc('config/mar
 function marginDot(rms,it){const m=S.margins;if(!m||!rms)return '';const d=(m.byDep||{})[rms.iikoName]||(m.byDep||{})[rms.name]||{};
   const fc=d[(it.name||'').trim()];if(fc==null)return '';
   const c=fc<=(m.green||0.2)?'#2EB82E':fc<=(m.orange||0.3)?'#F0A020':'#E53935';
-  return `<span class="mdot" style="background:${c}" title="фудкост ${Math.round(fc*100)}%"></span>`;}
+  return `<span class="mdot" style="background:${c}"></span>`;}
 async function loadMenu(rmsId){if(!S.menus[rmsId])S.menus[rmsId]=(await dbGetDoc('menus/'+rmsId))||{items:[]};return S.menus[rmsId];}
 function saveStructure(){dbSetDoc('config/structure',{rms:S.rms,fronts:S.fronts,conceptions:S.conceptions,stores:S.stores});}
 
@@ -851,7 +851,7 @@ async function renderOrder(scr,bar){
         <button class="nbtn" id="mn_back">←</button>
         <button class="nbtn" id="mn_home">⌂</button>
         <div class="msearch"><span class="ic">🔍</span><input id="mn_q" placeholder="Поиск по меню (название, часть слова)" value="${esc(S.menuQ||'')}" ${locked?'disabled':''}><button id="mn_qx" title="Очистить">✕</button></div>
-        <div style="color:#ccc;font-size:13px;margin-left:auto;white-space:nowrap;text-align:right;line-height:1.3">${esc(rms?rms.name:'')} · меню из iiko<br><span style="color:#2EB82E">●</span> высокая маржа <span style="color:#F0A020">●</span> средняя <span style="color:#E53935">●</span> низкая</div>
+        <div style="color:#ccc;font-size:13px;margin-left:auto;white-space:nowrap;text-align:right;line-height:1.3">${esc(rms?rms.name:'')} · меню из iiko</div>
       </div>
       <div class="menu-body">
         <div class="cats">${cats.map(c=>`<button class="cat ${c===S.cat?'on':''}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
