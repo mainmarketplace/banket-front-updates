@@ -297,6 +297,16 @@ function shiftNum(fid){return S.shifts.filter(x=>x.data.frontId===fid).length;}
     db.collection('shifts').onSnapshot(s=>{S.shifts=unwrapCol(s);if(['home'].includes(S.screen))render();});
   }catch(e){setInterval(async()=>{S.banquets=await dbGetCol('banquets');S.shifts=await dbGetCol('shifts');if(['list','closed','home'].includes(S.screen))render();},15000);}
 })();
+/* Популярность блюд: сколько раз администратор добавлял позицию в банкет (на этом компьютере).
+   Самые частые — в левом верхнем углу сетки, далее по убыванию. */
+S.usage=null;
+async function loadUsage(){if(!S.usage)S.usage=(await dbGetDoc('stats/dish_usage'))||{counts:{}};return S.usage;}
+const dishKey=i=>i.productId||('n:'+(i.name||'').toLowerCase().trim());
+let usageTimer=null;
+function bumpUsage(it){const u=S.usage||(S.usage={counts:{}});const k=dishKey(it);u.counts[k]=(u.counts[k]||0)+1;
+  clearTimeout(usageTimer);usageTimer=setTimeout(()=>dbSetDoc('stats/dish_usage',u),800);}
+function byPopularity(list){const c=(S.usage||{}).counts||{};
+  return list.slice().sort((a,b)=>((c[dishKey(b)]||0)-(c[dishKey(a)]||0))||(a.name||'').localeCompare(b.name||'','ru'));}
 async function loadMenu(rmsId){if(!S.menus[rmsId])S.menus[rmsId]=(await dbGetDoc('menus/'+rmsId))||{items:[]};return S.menus[rmsId];}
 function saveStructure(){dbSetDoc('config/structure',{rms:S.rms,fronts:S.fronts,conceptions:S.conceptions,stores:S.stores});}
 
@@ -795,6 +805,7 @@ async function renderOrder(scr,bar){
   const b=curBq();if(!b){go('list');return;}
   const rms=bqRms(b);
   const menu=rms?await loadMenu(rms.id):{items:[]};
+  await loadUsage();
   const locked=b.status!=='active';
   const cats=[...new Set(menu.items.map(i=>i.category||'Прочее'))];
   if(!S.cat||!cats.includes(S.cat))S.cat=cats[0]||null;
@@ -856,8 +867,8 @@ async function renderOrder(scr,bar){
   const drawDishes=()=>{
     const q=(S.menuQ||'').toLowerCase().trim();
     const words=q.split(/\s+/).filter(Boolean);
-    const its=q?menu.items.filter(i=>{const n=(i.name||'').toLowerCase();return words.every(w=>n.includes(w));}).slice(0,200)
-               :menu.items.filter(i=>(i.category||'Прочее')===S.cat);
+    const its=byPopularity(q?menu.items.filter(i=>{const n=(i.name||'').toLowerCase();return words.every(w=>n.includes(w));})
+               :menu.items.filter(i=>(i.category||'Прочее')===S.cat)).slice(0,q?200:100000);
     scr.querySelectorAll('.cats .cat').forEach(c=>c.classList.toggle('on',!q&&c.dataset.c===S.cat));
     const de=$('#dishes');
     de.innerHTML=(its.length?its.map(i=>`<button class="dish" data-d="${i.id}" ${locked?'disabled':''}>${esc(i.name)}<small>${q?esc(i.category||'')+' · ':''}${i.freePrice||!num(i.price)?'свободная цена':fmt0(i.price)}</small></button>`).join('')
@@ -867,6 +878,7 @@ async function renderOrder(scr,bar){
       const addIt=(price)=>{
         const ex=b.items.find(x=>x.name===it.name&&num(x.price)===num(price));
         if(ex){ex.qty=num(ex.qty)+1;S.selItem=ex.id;}else{const ni={id:uid(),name:it.name,price:price,qty:1,productId:it.productId||null};b.items.push(ni);S.selItem=ni.id;}
+        bumpUsage(it);
         saveBq(b);refreshCheck();
       };
       if(it.freePrice||!num(it.price)){ // свободная цена — как в iikoFront, спросить цену
