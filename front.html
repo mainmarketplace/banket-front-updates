@@ -124,6 +124,8 @@ td.stat-neu{text-align:center;font-size:13px;color:#666!important}
 .dishes .dish{background:var(--tile);border:1px solid #B5B5B5;color:var(--ink);min-height:86px;padding:8px;font-size:14px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;text-align:center}
 .dishes .dish:hover{background:var(--tile2)}
 .dishes .dish small{color:#777;margin-top:4px}
+.dishes .dish{position:relative}
+.dishes .dish .mdot{position:absolute;top:6px;left:6px;width:10px;height:10px;border-radius:50%;box-shadow:0 0 0 1px #fff}
 /* модальные окна в стиле iiko */
 .modal-back{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50}
 .imodal{background:#2E2F2F;box-shadow:0 8px 40px rgba(0,0,0,.6);min-width:480px;max-width:92vw;max-height:92vh;overflow:auto}
@@ -307,6 +309,13 @@ function bumpUsage(it){const u=S.usage||(S.usage={counts:{}});const k=dishKey(it
   clearTimeout(usageTimer);usageTimer=setTimeout(()=>dbSetDoc('stats/dish_usage',u),800);}
 function byPopularity(list){const c=(S.usage||{}).counts||{};
   return list.slice().sort((a,b)=>((c[dishKey(b)]||0)-(c[dishKey(a)]||0))||(a.name||'').localeCompare(b.name||'','ru'));}
+/* Метки маржинальности: фудкост блюда из iiko за 12 месяцев (зелёный ≤ green, оранжевый ≤ orange, красный выше) */
+S.margins=null;
+async function loadMargins(){if(!S.margins)S.margins=(await dbGetDoc('config/margins'))||{byDep:{}};return S.margins;}
+function marginDot(rms,it){const m=S.margins;if(!m||!rms)return '';const d=(m.byDep||{})[rms.iikoName]||(m.byDep||{})[rms.name]||{};
+  const fc=d[(it.name||'').trim()];if(fc==null)return '';
+  const c=fc<=(m.green||0.2)?'#2EB82E':fc<=(m.orange||0.3)?'#F0A020':'#E53935';
+  return `<span class="mdot" style="background:${c}" title="фудкост ${Math.round(fc*100)}%"></span>`;}
 async function loadMenu(rmsId){if(!S.menus[rmsId])S.menus[rmsId]=(await dbGetDoc('menus/'+rmsId))||{items:[]};return S.menus[rmsId];}
 function saveStructure(){dbSetDoc('config/structure',{rms:S.rms,fronts:S.fronts,conceptions:S.conceptions,stores:S.stores});}
 
@@ -805,7 +814,7 @@ async function renderOrder(scr,bar){
   const b=curBq();if(!b){go('list');return;}
   const rms=bqRms(b);
   const menu=rms?await loadMenu(rms.id):{items:[]};
-  await loadUsage();
+  await loadUsage();await loadMargins();
   const locked=b.status!=='active';
   const cats=[...new Set(menu.items.map(i=>i.category||'Прочее'))];
   if(!S.cat||!cats.includes(S.cat))S.cat=cats[0]||null;
@@ -842,7 +851,7 @@ async function renderOrder(scr,bar){
         <button class="nbtn" id="mn_back">←</button>
         <button class="nbtn" id="mn_home">⌂</button>
         <div class="msearch"><span class="ic">🔍</span><input id="mn_q" placeholder="Поиск по меню (название, часть слова)" value="${esc(S.menuQ||'')}" ${locked?'disabled':''}><button id="mn_qx" title="Очистить">✕</button></div>
-        <div style="color:#ccc;font-size:14px;margin-left:auto;white-space:nowrap">${esc(rms?rms.name:'')} · меню из iiko</div>
+        <div style="color:#ccc;font-size:13px;margin-left:auto;white-space:nowrap;text-align:right;line-height:1.3">${esc(rms?rms.name:'')} · меню из iiko<br><span style="color:#2EB82E">●</span> высокая маржа <span style="color:#F0A020">●</span> средняя <span style="color:#E53935">●</span> низкая</div>
       </div>
       <div class="menu-body">
         <div class="cats">${cats.map(c=>`<button class="cat ${c===S.cat?'on':''}" data-c="${esc(c)}">${esc(c)}</button>`).join('')}</div>
@@ -871,7 +880,7 @@ async function renderOrder(scr,bar){
                :menu.items.filter(i=>(i.category||'Прочее')===S.cat)).slice(0,q?200:100000);
     scr.querySelectorAll('.cats .cat').forEach(c=>c.classList.toggle('on',!q&&c.dataset.c===S.cat));
     const de=$('#dishes');
-    de.innerHTML=(its.length?its.map(i=>`<button class="dish" data-d="${i.id}" ${locked?'disabled':''}>${esc(i.name)}<small>${q?esc(i.category||'')+' · ':''}${i.freePrice||!num(i.price)?'свободная цена':fmt0(i.price)}</small></button>`).join('')
+    de.innerHTML=(its.length?its.map(i=>`<button class="dish" data-d="${i.id}" ${locked?'disabled':''}>${marginDot(rms,i)}${esc(i.name)}<small>${q?esc(i.category||'')+' · ':''}${i.freePrice||!num(i.price)?'свободная цена':fmt0(i.price)}</small></button>`).join('')
       :`<div style="color:#bbb;padding:20px;grid-column:1/-1">Ничего не найдено по «${esc(S.menuQ)}»</div>`);
     de.querySelectorAll('[data-d]').forEach(el=>el.onclick=()=>{
       const it=menu.items.find(i=>i.id===el.dataset.d);

@@ -261,6 +261,40 @@ def sync_prices():
     log("Синхронизация цен: " + res)
     return res
 
+def sync_margins():
+    """Фудкост блюд из iiko (OLAP «Продажи», банкетные заказы за 12 месяцев) → цветные метки
+    маржинальности на плитках фронта. Хранится в doc config/margins: {dep: {dish: foodcost}}."""
+    ii = Iiko(CFG)
+    today = datetime.date.today()
+    body = {"reportType": "SALES", "buildSummary": False,
+            "groupByRowFields": ["Department", "DishName"],
+            "aggregateFields": ["DishDiscountSumInt", "ProductCostBase.ProductCost"],
+            "filters": {"OpenDate.Typed": {"filterType": "DateRange", "periodType": "CUSTOM",
+                                           "from": (today - datetime.timedelta(days=365)).isoformat(), "to": today.isoformat()},
+                        "Banquet": {"filterType": "IncludeValues", "values": ["TRUE"]},
+                        "DeletedWithWriteoff": {"filterType": "IncludeValues", "values": ["NOT_DELETED"]},
+                        "OrderDeleted": {"filterType": "IncludeValues", "values": ["NOT_DELETED"]}}}
+    try:
+        ii.auth()
+        raw = ii._req("/resto/api/v2/reports/olap", data=json.dumps(body).encode("utf-8"),
+                      headers={"Content-Type": "application/json"})
+    finally:
+        ii.logout()
+    data = json.loads(raw).get("data") or []
+    by = {}
+    for r in data:
+        dep = (r.get("Department") or "").strip(); name = (r.get("DishName") or "").strip()
+        rev = float(r.get("DishDiscountSumInt") or 0); cost = float(r.get("ProductCostBase.ProductCost") or 0)
+        if not dep or not name or rev <= 0:
+            continue
+        by.setdefault(dep, {})[name] = round(cost / rev, 4)
+    doc_set("config/margins", {"byDep": by, "syncedAt": datetime.datetime.now().isoformat(),
+                               "green": float(CFG.get("margin_green", 0.20)), "orange": float(CFG.get("margin_orange", 0.30))})
+    res = "фудкост: %d блюд в %d производствах" % (sum(len(v) for v in by.values()), len(by))
+    SYNC_STATE["margins"] = res
+    log("Маржинальность: " + res)
+    return res
+
 def sync_menu():
     """Строит меню каждого РМС из действующего прайс-листа iiko (приказы),
     с теми же группами и ценами, что видит iikoFront."""
@@ -883,6 +917,8 @@ def scheduler():
                     except Exception as e: log("Ошибка синка сотрудников: %s" % e)
                     try: sync_menu()
                     except Exception as e: log("Ошибка синка меню: %s" % e)
+                    try: sync_margins()
+                    except Exception as e: log("Ошибка синка маржинальности: %s" % e)
             if time.time() - last_update_check > 3600:
                 last_update_check = time.time()
                 try: check_update()
@@ -1056,6 +1092,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if p.path == "/api/sync":
                 r = sync_menu() + "; " + sync_employees()
+                try: r += "; " + sync_margins()
+                except Exception as e: r += "; маржинальность: %s" % e
                 return self._send(200, json.dumps({"result": r}, ensure_ascii=False))
             if p.path == "/api/publish":
                 # публикация СВОИХ файлов обновления по заранее выданным ссылкам загрузчика
