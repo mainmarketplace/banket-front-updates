@@ -348,7 +348,7 @@ function remoteInfo(b){
     <div style="padding:16px 22px;font-size:17px;line-height:1.6">
       Ведётся на компьютере <b>${esc(b._host||'')}</b>, зал <b>${esc(bqFrontName(b))}</b>.<br>
       ${ruDate(b.date)} ${esc(b.time||'')} · ${esc(b.client&&b.client.name||'')}${b.client&&b.client.phone?' · т. '+esc(b.client.phone):''}${b.guests?' · гостей: '+esc(b.guests):''}<br>
-      Статус: <b>${b.status==='closed'?'Проведён':b.status==='cancelled'?'Снят':'Действует'}</b> · Сумма ${fmt0(num(b.total))} · внесено ${fmt0(num(b.paid))}<br>
+      Статус: <b>${b.status==='closed'?'Проведён':b.status==='cancelled'?'Снят':'Действует'}</b>${b.status==='closed'?(b.iikoStatus==='uploaded'?' · акт в iiko создан':b.iikoError?' · <span style="color:#C22">акт не ушёл: '+esc(b.iikoError)+'</span>':' · акт в очереди'):''} · Сумма ${fmt0(num(b.total))} · внесено ${fmt0(num(b.paid))}<br>
       ${b.comment?'<span class="muted">'+esc(b.comment)+'</span><br>':''}
       <span class="muted">Данные на ${b._pcUpdated?ruDT(b._pcUpdated):'—'}. Изменить банкет можно только на том компьютере.</span></div>
     <div class="mbtns"><button id="m_no">Закрыть</button></div></div>`);
@@ -638,7 +638,7 @@ function renderMonth(scr,bar){
   <table class="ilist"><thead><tr><th style="width:80px">№ Заказа</th><th style="width:150px">Дата</th><th style="width:190px">Статус</th>
   <th>Зал (фронт)</th><th>Клиент</th><th style="width:130px">Сумма</th><th style="width:130px">Внесено</th><th style="width:130px">Остаток</th></tr></thead>
   <tbody>${rows.length?rows.map(x=>{const b=x.data,t=bqTotals(b);
-    const st=b.status==='closed'?`<td class="stat-neu">Проведен${b.iikoStatus==='uploaded'?'<br><small style="color:#2A7">акт в iiko</small>':b.iikoStatus==='pending'?'<br><small style="color:#888">акт в очереди</small>':''}</td>`
+    const st=b.status==='closed'?`<td class="stat-neu">Проведен${b.iikoStatus==='uploaded'?'<br><small style="color:#2A7">акт в iiko</small>':b.iikoStatus==='pending'?(b.iikoError?'<br><small style="color:#C22" title="'+esc(b.iikoError)+'">акт не ушёл в iiko</small>':'<br><small style="color:#888">акт в очереди</small>'):''}</td>`
       :b.status==='cancelled'?`<td class="stat-neu">Снят</td>`
       :b.date<todayISO()?`<td class="stat-late">Прошёл, не проведён!</td>`
       :`<td class="stat-neu" style="color:#2A7">Предстоит</td>`;
@@ -1071,7 +1071,7 @@ function renderPay(scr,bar){
   $('#pm_card').onclick=()=>addPay('card');
   $('#pm_acc').onclick=()=>addPay('account');
   $('#paybtn').onclick=()=>{
-    iConfirm('Закрыть банкет? Он будет проведён, акт реализации создастся в iiko автоматически в 23:00.',()=>{
+    iConfirm('Закрыть банкет? Он будет проведён, акт реализации уйдёт в iiko сам через пару минут.',()=>{
       b.status='closed';b.closedAt=new Date().toISOString();b.iikoStatus='pending';b.shiftId=sh.id;
       saveBq(b,true);go('list');
     });
@@ -1105,7 +1105,7 @@ function renderClosed(scr,bar){
     <td style="text-align:right"><b>${fmt(t.total)}</b></td>
     <td style="font-size:13px">${b.items.slice(0,3).map(i=>esc(i.name)+' × '+esc(i.qty)).join(';<br>')}${b.items.length>3?'; …':''}</td>
     <td style="font-size:13px">${pays||'—'}</td>
-    <td class="cnt">${b.iikoStatus==='uploaded'?'<span style="color:#2A7">создан</span>':'<span style="color:#C80">в очереди</span>'}</td></tr>`;}).join('')
+    <td class="cnt">${b.iikoStatus==='uploaded'?'<span style="color:#2A7">создан</span>':b.iikoError?'<span style="color:#C22">не ушёл</span><br><small style="color:#C22">'+esc(b.iikoError)+'</small>':'<span style="color:#C80">в очереди</span>'}</td></tr>`;}).join('')
     :`<tr><td colspan="8" style="text-align:center;color:#999;padding:30px">За эту дату закрытых заказов нет</td></tr>`}</tbody></table>`;
   scr.querySelectorAll('[data-d]').forEach(x=>x.onclick=()=>{S.closedDate=x.dataset.d;render();});
   scr.querySelectorAll('[data-o]').forEach(r=>r.onclick=()=>{S.editingId=r.dataset.o;go('card');});
@@ -1147,6 +1147,33 @@ function printDay(){
 }
 
 /* ================= НАСТРОЙКИ (меню и структура) ================= */
+/* состояние всех компьютеров с фронтом: кто на связи, что не ушло в iiko */
+async function drawPcs(){
+  const box=$('#pcs_box');if(!box)return;
+  try{
+    const d=await fetch('/api/pcs').then(x=>x.json());
+    const now=new Date(d.now||Date.now());
+    const ago=iso=>{if(!iso)return null;return Math.round((now-new Date(iso))/60000);};
+    const agoTxt=m=>m==null?'—':m<2?'только что':m<90?m+' мин назад':m<48*60?Math.round(m/60)+' ч назад':Math.round(m/1440)+' дн назад';
+    box.innerHTML='<table><thead><tr><th>Компьютер</th><th style="width:110px">Версия</th><th style="width:190px">Был на связи</th><th style="width:170px">Ждёт отправки в iiko</th><th>Последняя отправка</th></tr></thead><tbody>'+
+    (d.pcs||[]).map(pc=>{
+      const st=pc.state||null, m=pc.self?0:ago(pc.updatedAt);
+      const wait=st?(st.aktWait||0):(pc.aktWait||0), pw=st?(st.payWait||0):0;
+      const oldM=st&&st.oldestWait?ago(st.oldestWait):null;
+      const bad=(st&&st.errors&&st.errors.length)||(wait&&oldM!=null&&oldM>15)||pc.pushError;
+      const link=pc.self?(pc.pushError?'<span style="color:#C22">этот компьютер — в общий список не пишет: '+esc(pc.pushError)+'</span>':'<b>этот компьютер</b>')
+        :'<span style="color:'+(m!=null&&m>24*60?'#C22':m!=null&&m>90?'#C80':'#2A7')+'">'+(pc.updatedAt?ruDT(pc.updatedAt)+'<br><small>'+agoTxt(m)+'</small>':'—')+'</span>';
+      const waitTxt=!st&&!pc.self?(wait?'<span style="color:#C80">актов: '+wait+'</span>':'—')
+        :(wait||pw?'<span style="color:'+(bad?'#C22':'#C80')+'">'+(wait?'актов: '+wait:'')+(wait&&pw?', ':'')+(pw?'оплат: '+pw:'')+(oldM!=null?'<br><small>с '+ruDT(st.oldestWait)+'</small>':'')+'</span>':'<span style="color:#2A7">ничего</span>');
+      let last=!st?'<span class="muted" style="color:#888">старая версия программы — состояние не сообщает</span>'
+        :(st.dry?'<span style="color:#C80">пробный режим — в iiko не отправляет</span><br>':'')+(!st.iiko?'<span style="color:#C22">не задан вход в iiko</span><br>':'')
+         +(st.lastAkt?'<small>'+ruDT(st.lastAkt)+'</small> '+esc(st.lastAktResult||''):'ещё не отправлял')
+         +(st.lastPayResult?'<br><small>'+ruDT(st.lastPay)+'</small> '+esc(st.lastPayResult):'')
+         +((st.errors||[]).length?'<br><span style="color:#C22">'+st.errors.map(esc).join('<br>')+'</span>':'');
+      return '<tr><td><b>'+esc(pc.host||pc.pc||'')+'</b>'+(pc.banquets!=null?'<br><small style="color:#888">банкетов: '+pc.banquets+'</small>':'')+'</td><td>'+esc(st&&st.version||'—')+'</td><td>'+link+'</td><td>'+waitTxt+'</td><td style="font-size:13px">'+last+'</td></tr>';
+    }).join('')+'</tbody></table><p class="muted">Акт реализации уходит в iiko через 2 минуты после закрытия банкета, оплата — сразу. Если iiko недоступен, программа повторяет сама: через 3, 6, 12 минут и дальше не реже раза в час.</p>';
+  }catch(e){box.innerHTML='<p class="muted">Состояние компьютеров недоступно (запущено без сервера).</p>';}
+}
 async function renderSettings(scr,bar){
   if(!S.rms.length){scr.innerHTML='<div class="setwrap">Структура не загружена.</div>';return;}
   if(!S.menuRms)S.menuRms=S.rms[0].id;
@@ -1165,6 +1192,8 @@ async function renderSettings(scr,bar){
       <td style="width:40px"><button data-fd="${f.id}" style="border:none;background:none;cursor:pointer">✕</button></td></tr>`).join('')}
     </tbody></table>
     <p><button class="wtile" id="addFront" style="padding:10px 20px">+ Добавить фронт</button></p>
+    <h3>Компьютеры с фронтом — связь и отправка в iiko</h3>
+    <div id="pcs_box"><p class="muted">Загружаю…</p></div>
     <h3>Программа</h3>
     <p class="muted" id="verinfo">Версия: …</p>
     <p><button class="wtile" id="btn_update" style="padding:10px 20px">Обновить программу</button>
@@ -1185,6 +1214,7 @@ async function renderSettings(scr,bar){
       <td style="width:40px"><button data-md="${i.id}" style="border:none;background:none;cursor:pointer">✕</button></td></tr>`).join('')}
     </tbody></table>`).join('')}
   </div>`;
+  drawPcs();
   try{const st=await fetch('/api/status').then(x=>x.json());
     $('#verinfo').textContent='Версия: '+(st.version||'—')+(st.last_sync_result?' · '+st.last_sync_result:'');}catch(e){$('#verinfo').textContent='Версия: (запущено без сервера)';}
   const act=(url,msg)=>async()=>{$('#upd_msg').textContent=msg;

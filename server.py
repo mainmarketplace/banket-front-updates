@@ -633,6 +633,7 @@ def refresh_pins(shared=None):
     return "PIN обновлены: %d" % len([e for e in emps if e.get("pin")])
 
 # ---------------- общий список банкетов всех залов ----------------
+SELF_PC = {}  # этот компьютер — для экрана «Компьютеры с фронтом»
 def pc_id():
     d = doc_get("config/pc") or {}
     if not d.get("id"):
@@ -647,11 +648,34 @@ def bq_summary(b, bid):
     paid = sum(float(p.get("amount") or 0) for p in b.get("payments", []))
     return {"id": bid, "num": b.get("num"), "date": b.get("date"), "time": b.get("time"),
             "frontId": b.get("frontId"), "status": b.get("status"), "iikoStatus": b.get("iikoStatus"),
+            "iikoError": (str(b.get("iikoError"))[:200] if b.get("iikoError") else None),
             "closedAt": b.get("closedAt"), "client": {"name": c.get("name"), "phone": c.get("phone"), "guests": c.get("guests")},
             "guests": c.get("guests"), "total": bq_totals(b), "paid": round(paid, 2), "sub": round(sub, 2),
             "comment": (b.get("comment") or "")[:120]}
 
+STARTED_AT = datetime.datetime.now().isoformat(timespec="seconds")
+def pc_state():
+    """Состояние этого компьютера для общего списка: версия, что ждёт отправки в iiko, последняя ошибка."""
+    try:
+        akts, pays, oldest, errors = iiko_queue()
+    except Exception:
+        akts, pays, oldest, errors = 0, 0, None, []
+    return {"version": local_version(), "dry": dry_run(),
+            "iiko": bool(CFG.get("iiko_login") and CFG.get("iiko_password")),
+            "aktWait": akts, "payWait": pays, "oldestWait": oldest, "errors": errors[:5],
+            "lastAkt": SYNC_STATE.get("last_akt"), "lastAktResult": str(SYNC_STATE.get("last_akt_result") or "")[:300],
+            "lastPay": SYNC_STATE.get("last_pay"), "lastPayResult": str(SYNC_STATE.get("last_pay_result") or "")[:300],
+            "startedAt": STARTED_AT}
+
+def _state_sign(st):
+    """Что в состоянии считается изменением (время последней попытки — нет, иначе писали бы без конца)."""
+    return json.dumps({k: st.get(k) for k in ("version", "dry", "iiko", "aktWait", "payWait", "errors",
+                                                "lastAktResult", "lastPayResult", "startedAt")},
+                      ensure_ascii=False, sort_keys=True)
+
+HEARTBEAT_SEC = 1800  # даже без изменений раз в полчаса сообщаем «я на связи»
 _bq_push_hash = [""]
+_bq_push_at = [0]
 def push_banquets(force=False):
     """Выгрузить сводку банкетов этого компьютера в общий список (файл bq-<pc>.json в gist)."""
     tok = gist_token()
@@ -668,13 +692,23 @@ def push_banquets(force=False):
         s["frontName"] = fronts.get(s["frontId"], "")
         items.append(s)
     items.sort(key=lambda s: (s["date"] or "", s["time"] or ""))
-    payload = {"pc": pid, "host": _socket.gethostname(), "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"), "items": items}
+    state = pc_state()
+    payload = {"pc": pid, "host": _socket.gethostname(), "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
+               "state": state, "items": items}
     body_txt = json.dumps(payload, ensure_ascii=False, indent=0)
-    h = hashlib.sha256(json.dumps(items, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
-    if h == _bq_push_hash[0] and not force:
+    h = hashlib.sha256((json.dumps(items, ensure_ascii=False, sort_keys=True) + _state_sign(state)).encode()).hexdigest()
+    SELF_PC.update({k: payload[k] for k in ("pc", "host", "state")})
+    if h == _bq_push_hash[0] and not force and time.time() - _bq_push_at[0] < HEARTBEAT_SEC:
         return "без изменений"
-    gist_api("PATCH", files={"bq-%s.json" % pid: {"content": body_txt}}, token=tok)
+    try:
+        gist_api("PATCH", files={"bq-%s.json" % pid: {"content": body_txt}}, token=tok)
+    except Exception as e:
+        SELF_PC["pushError"] = str(e)[:200]
+        raise
     _bq_push_hash[0] = h
+    _bq_push_at[0] = time.time()
+    SELF_PC["updatedAt"] = payload["updatedAt"]
+    SELF_PC.pop("pushError", None)
     return "выгружено банкетов: %d" % len(items)
 
 def pull_banquets():
@@ -701,7 +735,10 @@ def pull_banquets():
         try:  # брошенные файлы (компьютер переустановлен) старше 30 дней не показываем
             age = datetime.datetime.now() - datetime.datetime.fromisoformat(d.get("updatedAt"))
             if age.days > 30:
-                continue
+                if age.days > 180:
+                    continue
+                d = {"pc": d.get("pc"), "host": d.get("host"), "updatedAt": d.get("updatedAt"),
+                     "state": d.get("state"), "items": [], "stale": True}
         except Exception:
             pass
         pcs[d.get("pc") or name] = d
@@ -710,7 +747,11 @@ def pull_banquets():
     return "компьютеров: %d, банкетов: %d" % (len(pcs), n)
 
 def sync_banquets(force=False):
-    r1 = push_banquets(force)
+    try:
+        r1 = push_banquets(force)
+    except Exception as e:
+        r1 = "не выгружено: %s" % e
+        log("Общий список банкетов (выгрузка): %s" % e)
     r2 = pull_banquets()
     SYNC_STATE["banquets"] = "%s; %s" % (r1, r2)
     return SYNC_STATE["banquets"]
@@ -734,6 +775,31 @@ def sync_employees():
         log("ВНИМАНИЕ: ни у одного сотрудника не найден PIN в API — вход во фронт будет без PIN, пришлите logs Клоду.")
     return res
 
+def keep_server_marks(path, new):
+    """Браузер сохраняет банкет целиком из своей копии, которая может быть старее серверной.
+    Отметки «оплата выгружена» и «акт создан» ставит сервер — не даём их затереть (иначе дубли в iiko)."""
+    try:
+        old = doc_get(path) or {}
+        if not isinstance(new, dict) or not old:
+            return new
+        sent = {p.get("id") for p in (old.get("payments") or []) if p.get("exported")}
+        for p in (new.get("payments") or []):
+            if p.get("id") in sent:
+                p["exported"] = True
+        same_close = new.get("status") == "closed" and new.get("closedAt") and new.get("closedAt") == old.get("closedAt")
+        if same_close and new.get("iikoStatus") == "pending":
+            if old.get("iikoStatus") == "uploaded":
+                new["iikoStatus"] = "uploaded"
+                if old.get("iikoSentAt"): new["iikoSentAt"] = old["iikoSentAt"]
+                new.pop("iikoError", None)
+            elif old.get("iikoError"):
+                new["iikoError"] = old["iikoError"]
+        if not same_close:
+            new.pop("iikoError", None); new.pop("iikoSentAt", None)
+    except Exception as e:
+        log("Сверка отметок банкета: %s" % e)
+    return new
+
 # ---------------- акты реализации ----------------
 def bq_totals(b):
     sub = sum(float(i.get("price") or 0) * float(i.get("qty") or 0) for i in b.get("items", []))
@@ -741,7 +807,62 @@ def bq_totals(b):
     discount = sub * float(b.get("discountPct") or 0) / 100 + float(b.get("discountRub") or 0)
     return round(sub + service - discount, 2)
 
+IIKO_LOCK = threading.RLock()  # акты и ордера отправляет только один поток — иначе возможны дубли
+AKT_GRACE = 120  # секунд после закрытия банкета до отправки акта: время передумать и переоткрыть
+QUEUE = {"next": 0, "fails": 0, "sig": ""}
+
+def _queue_sig():
+    """Состав очереди (кто ждёт). Появился новый банкет или оплата — отправляем сразу, не дожидаясь паузы."""
+    ids = []
+    for x in col_get("banquets"):
+        b = x.get("data") or {}
+        if b.get("status") == "closed" and b.get("iikoStatus") == "pending" and _iso_age(b.get("closedAt")) >= AKT_GRACE:
+            ids.append("a:" + x["id"])
+        ids += ["p:%s" % p.get("id") for p in (b.get("payments") or []) if not p.get("exported")]
+    return "|".join(sorted(ids))
+
+def _iso_age(iso):
+    """Сколько секунд прошло с момента iso (время из браузера — UTC с Z)."""
+    try:
+        d = datetime.datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if d.tzinfo is None:
+            return (datetime.datetime.now() - d).total_seconds()
+        return (datetime.datetime.now(datetime.timezone.utc) - d).total_seconds()
+    except Exception:
+        return 10 ** 9
+
+def iiko_queue(grace=0):
+    """Что ждёт отправки в iiko: (актов, оплат, самое давнее закрытие, ошибки по банкетам)."""
+    akts, pays, oldest, errors = 0, 0, None, []
+    for x in col_get("banquets"):
+        b = x.get("data") or {}
+        if b.get("status") == "closed" and b.get("iikoStatus") == "pending":
+            if _iso_age(b.get("closedAt")) >= grace:
+                akts += 1
+            if b.get("closedAt") and (oldest is None or b["closedAt"] < oldest):
+                oldest = b["closedAt"]
+            if b.get("iikoError"):
+                errors.append("№%s: %s" % (b.get("num", ""), str(b["iikoError"])[:200]))
+        pays += len([p for p in (b.get("payments") or []) if not p.get("exported")])
+    return akts, pays, oldest, errors
+
+def _set_bq_error(x, b, err):
+    """Запомнить в самом банкете, почему акт не ушёл (видно во фронте и в общем списке)."""
+    if b.get("iikoError") != err:
+        b["iikoError"] = err
+        doc_set("banquets/" + x["id"], b)
+
 def run_akty(shift_id=None):
+    with IIKO_LOCK:
+        try:
+            return _run_akty(shift_id)
+        except Exception as e:
+            SYNC_STATE["last_akt"] = datetime.datetime.now().isoformat()
+            SYNC_STATE["last_akt_result"] = "нет связи с iiko: %s" % e
+            log("Акты реализации: нет связи с iiko: %s" % e)
+            raise
+
+def _run_akty(shift_id=None):
     """Создаёт акты реализации по закрытым банкетам со статусом pending.
     shift_id — только по банкетам этой кассовой смены (вызов при закрытии смены, как в iiko)."""
     pend = [x for x in col_get("banquets")
@@ -783,6 +904,7 @@ def run_akty(shift_id=None):
             if problems:
                 skipped.append("банкет %s (%s): %s" % (b.get("date"),
                     (b.get("client") or {}).get("name", ""), "; ".join(problems)))
+                _set_bq_error(x, b, "; ".join(problems))
                 continue
             comment = "Банкет %s, %s, фронт %s. Итог %s" % (
                 b.get("date"), (b.get("client") or {}).get("name", ""), fr.get("name"), bq_totals(b))
@@ -806,10 +928,13 @@ def run_akty(shift_id=None):
                 with open(fn + ".response.txt", "w", encoding="utf-8") as f:
                     f.write(resp)
                 b["iikoStatus"] = "uploaded"
+                b["iikoSentAt"] = datetime.datetime.now().isoformat(timespec="seconds")
+                b.pop("iikoError", None)
                 doc_set("banquets/" + x["id"], b)
                 done += 1
             except Exception as e:
                 skipped.append("банкет %s: ошибка iiko: %s" % (b.get("date"), e))
+                _set_bq_error(x, b, "iiko не принял акт: %s" % str(e)[:300])
     finally:
         ii.logout()
     res = "создано актов: %d; пропущено: %d" % (done, len(skipped))
@@ -827,6 +952,50 @@ def xml_escape(t):
     return (str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 def run_payments():
+    with IIKO_LOCK:
+        try:
+            r = _run_payments()
+        except Exception as e:
+            SYNC_STATE["last_pay"] = datetime.datetime.now().isoformat()
+            SYNC_STATE["last_pay_result"] = "нет связи с iiko: %s" % e
+            log("Кассовые ордера по оплатам: нет связи с iiko: %s" % e)
+            raise
+        if r != "новых оплат нет":
+            SYNC_STATE["last_pay"] = datetime.datetime.now().isoformat()
+            SYNC_STATE["last_pay_result"] = r
+        return r
+
+def flush_iiko():
+    """Очередь в iiko: акты по закрытым банкетам (через AKT_GRACE после закрытия) и неотправленные оплаты.
+    При неудаче повторяет: через 3, 6, 12… минут, но не реже раза в час."""
+    if not (CFG.get("iiko_login") and CFG.get("iiko_password")) or dry_run():
+        return
+    if time.time() < QUEUE["next"] and _queue_sig() == QUEUE["sig"]:
+        return
+    akts, pays, _, _ = iiko_queue(grace=AKT_GRACE)
+    if not (akts or pays):
+        QUEUE["fails"] = 0
+        return
+    if akts:
+        try: run_akty()
+        except Exception: pass
+    if pays:
+        try: run_payments()
+        except Exception: pass
+    akts2, pays2, _, _ = iiko_queue(grace=AKT_GRACE)
+    if akts2 or pays2:
+        QUEUE["fails"] += 1
+        QUEUE["sig"] = _queue_sig()
+        delay = min(180 * 2 ** (QUEUE["fails"] - 1), 3600)
+        QUEUE["next"] = time.time() + delay
+        log("Очередь в iiko: не ушло актов: %d, оплат: %d. Повтор через %d мин." % (akts2, pays2, delay // 60))
+    else:
+        QUEUE["fails"] = 0
+        QUEUE["next"] = 0
+    try: sync_banquets()  # результат сразу виден остальным компьютерам
+    except Exception: pass
+
+def _run_payments():
     """Выгружает новые предоплаты банкетов в iiko приходными кассовыми ордерами,
     чтобы бухгалтер видел оплаты в фин.модуле, как при работе через iikoFront."""
     st = doc_get("config/structure") or {}
@@ -923,6 +1092,8 @@ def scheduler():
                 last_update_check = time.time()
                 try: check_update()
                 except Exception as e: log("Проверка обновлений: %s" % e)
+            try: flush_iiko()
+            except Exception as e: log("Очередь в iiko: %s" % e)
             hh, mm = CFG.get("akt_time", "23:00").split(":")
             if CFG.get("iiko_login") and now.hour == int(hh) and now.minute >= int(mm) and last_akt_day != now.date():
                 last_akt_day = now.date()
@@ -1062,6 +1233,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(out, ensure_ascii=False))
             except Exception as e:
                 return self._send(500, json.dumps({"error": str(e)}, ensure_ascii=False))
+        if p.path == "/api/pcs":
+            # состояние всех компьютеров с фронтом: этот — живьём, остальные — из общего списка
+            me = dict(SELF_PC) if SELF_PC.get("pc") else {"pc": pc_id(), "host": _socket.gethostname()}
+            me["state"] = pc_state(); me["self"] = True
+            if not gist_token():
+                me["pushError"] = "нет доступа к общему списку (ключ GitHub)"
+            sh = doc_get("shared/banquets") or {}
+            others = []
+            for d in (sh.get("pcs") or {}).values():
+                its = d.get("items") or []
+                others.append({"pc": d.get("pc"), "host": d.get("host"), "updatedAt": d.get("updatedAt"),
+                               "state": d.get("state"), "banquets": len(its),
+                               "aktWait": len([i for i in its if i.get("status") == "closed" and i.get("iikoStatus") == "pending"])})
+            others.sort(key=lambda d: d.get("updatedAt") or "", reverse=True)
+            return self._send(200, json.dumps({"now": datetime.datetime.now().isoformat(timespec="seconds"),
+                                               "pulledAt": sh.get("updatedAt"), "pcs": [me] + others}, ensure_ascii=False))
         if p.path == "/api/status":
             return self._send(200, json.dumps({
                 "dry_run": dry_run(),
@@ -1083,7 +1270,12 @@ class Handler(BaseHTTPRequestHandler):
             path = urllib.parse.unquote(p.path[len("/api/doc/"):])
             ln = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(ln).decode("utf-8")
-            doc_set(path, json.loads(body))
+            data = json.loads(body)
+            if path.startswith("banquets/"):
+                with IIKO_LOCK:
+                    doc_set(path, keep_server_marks(path, data))
+            else:
+                doc_set(path, data)
             return self._send(200, '{"ok":true}')
         return self._send(404, '{"error":"not found"}')
 
