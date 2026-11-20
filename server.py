@@ -8,7 +8,7 @@
 Запуск:  py server.py
 """
 import json, sqlite3, hashlib, threading, time, datetime, os, sys, re
-import urllib.request, urllib.parse
+import urllib.request, urllib.parse, urllib.error
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import socket as _socket
@@ -123,8 +123,17 @@ class Iiko:
         req = urllib.request.Request(url, data=data, method=method or ("POST" if data else "GET"))
         for k, v in (headers or {}).items():
             req.add_header(k, v)
-        with urllib.request.urlopen(req, timeout=60) as r:
-            return r.read().decode("utf-8", "replace")
+        try:
+            with urllib.request.urlopen(req, timeout=60) as r:
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            # iiko вместе с кодом отказа присылает объяснение — сохраняем его, иначе причину не узнать
+            try:
+                body = e.read().decode("utf-8", "replace")
+            except Exception:
+                body = ""
+            body = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body)).strip()
+            raise Exception("iiko ответил отказом %s на %s%s" % (e.code, path, (": " + body[:600]) if body else " (без объяснения)"))
 
     def auth(self):
         if not self.login or not self.password:
@@ -648,7 +657,7 @@ def bq_summary(b, bid):
     paid = sum(float(p.get("amount") or 0) for p in b.get("payments", []))
     return {"id": bid, "num": b.get("num"), "date": b.get("date"), "time": b.get("time"),
             "frontId": b.get("frontId"), "status": b.get("status"), "iikoStatus": b.get("iikoStatus"),
-            "iikoError": (str(b.get("iikoError"))[:200] if b.get("iikoError") else None),
+            "iikoError": (str(b.get("iikoError"))[:700] if b.get("iikoError") else None),
             "closedAt": b.get("closedAt"), "client": {"name": c.get("name"), "phone": c.get("phone"), "guests": c.get("guests")},
             "guests": c.get("guests"), "total": bq_totals(b), "paid": round(paid, 2), "sub": round(sub, 2),
             "comment": (b.get("comment") or "")[:120]}
@@ -663,8 +672,8 @@ def pc_state():
     return {"version": local_version(), "dry": dry_run(),
             "iiko": bool(CFG.get("iiko_login") and CFG.get("iiko_password")),
             "aktWait": akts, "payWait": pays, "oldestWait": oldest, "errors": errors[:5],
-            "lastAkt": SYNC_STATE.get("last_akt"), "lastAktResult": str(SYNC_STATE.get("last_akt_result") or "")[:300],
-            "lastPay": SYNC_STATE.get("last_pay"), "lastPayResult": str(SYNC_STATE.get("last_pay_result") or "")[:300],
+            "lastAkt": SYNC_STATE.get("last_akt"), "lastAktResult": str(SYNC_STATE.get("last_akt_result") or "")[:900],
+            "lastPay": SYNC_STATE.get("last_pay"), "lastPayResult": str(SYNC_STATE.get("last_pay_result") or "")[:900],
             "startedAt": STARTED_AT}
 
 def _state_sign(st):
@@ -842,7 +851,7 @@ def iiko_queue(grace=0):
             if b.get("closedAt") and (oldest is None or b["closedAt"] < oldest):
                 oldest = b["closedAt"]
             if b.get("iikoError"):
-                errors.append("№%s: %s" % (b.get("num", ""), str(b["iikoError"])[:200]))
+                errors.append("№%s: %s" % (b.get("num", ""), str(b["iikoError"])[:700]))
         pays += len([p for p in (b.get("payments") or []) if not p.get("exported")])
     return akts, pays, oldest, errors
 
@@ -927,6 +936,8 @@ def _run_akty(shift_id=None):
                 resp = ii.import_sales_act(xml_body)
                 with open(fn + ".response.txt", "w", encoding="utf-8") as f:
                     f.write(resp)
+                if re.search(r"<valid>\s*false", resp or "", re.I):
+                    raise Exception("документ не прошёл проверку iiko: " + re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", resp)).strip()[:600])
                 b["iikoStatus"] = "uploaded"
                 b["iikoSentAt"] = datetime.datetime.now().isoformat(timespec="seconds")
                 b.pop("iikoError", None)
@@ -934,7 +945,7 @@ def _run_akty(shift_id=None):
                 done += 1
             except Exception as e:
                 skipped.append("банкет %s: ошибка iiko: %s" % (b.get("date"), e))
-                _set_bq_error(x, b, "iiko не принял акт: %s" % str(e)[:300])
+                _set_bq_error(x, b, "iiko не принял акт: %s" % str(e)[:700])
     finally:
         ii.logout()
     res = "создано актов: %d; пропущено: %d" % (done, len(skipped))
