@@ -714,6 +714,73 @@ def fleet_enable():
     names = [v.get("host") for v in ok.values()]
     return "общий список зашифрован; допущены: %s" % (", ".join(names) if names else "только этот компьютер")
 
+# ---------- доступ к iiko через зашифрованный общий список ----------
+CREDS_FILE = "creds.json"
+CRED_KEYS = ("iiko_url", "iiko_login", "iiko_password")
+def _apply_creds(cr):
+    """Записать полученный доступ к iiko в config.json этого компьютера (если отличается)."""
+    upd = {k: cr[k] for k in CRED_KEYS if cr.get(k)}
+    if not upd or all(CFG.get(k) == v for k, v in upd.items()):
+        return False
+    with open(CONFIG_PATH, encoding="utf-8-sig") as f:
+        raw = json.load(f)
+    raw.update(upd)
+    tmp = CONFIG_PATH + ".new"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(raw, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, CONFIG_PATH)
+    CFG.update(upd)
+    log("Получен новый доступ к iiko из общего списка (пользователь %s) — записан в config.json" % upd.get("iiko_login", CFG.get("iiko_login")))
+    return True
+
+def _sanitize_installer():
+    """Убрать пароль iiko из установщика в общем gist (он раньше лежал там открытым текстом)."""
+    f = (gist_api("GET").get("files") or {}).get("install.ps1") or {}
+    txt = f.get("content") or ""
+    if f.get("truncated") and f.get("raw_url"):
+        txt = urllib.request.urlopen(f["raw_url"], timeout=60).read().decode("utf-8")
+    new = re.sub(r"(iiko_password\s*=\s*)'[^']*'", r"\1''", txt)
+    if txt and new != txt:
+        gist_api("PATCH", files={"install.ps1": {"content": new}})
+        log("Пароль iiko убран из установщика в общем списке")
+        return True
+    return False
+
+def setup_iiko(login, password, url=None):
+    """Владелец задаёт новый доступ к iiko: проверка входом в iiko, затем раздача всем фронтам в зашифрованном виде."""
+    if not (is_owner_admin() and fleet_key()):
+        raise Exception("задавать доступ к iiko можно только с компьютера владельца после включения шифрования")
+    login = (login or "").strip(); password = password or ""
+    url = (url or CFG.get("iiko_url") or "").strip()
+    if not (login and password and url):
+        raise Exception("нужны логин и пароль")
+    ii = Iiko({"iiko_url": url, "iiko_login": login, "iiko_password": password})
+    ii.auth(); ii.logout()
+    cr = {"iiko_url": url, "iiko_login": login, "iiko_password": password,
+          "at": datetime.datetime.now().isoformat(timespec="seconds")}
+    gist_api("PATCH", files={CREDS_FILE: {"content": json.dumps(fleet_seal(cr), indent=1)}})
+    try: san = _sanitize_installer()
+    except Exception as e: san = False; log("Установщик: %s" % e)
+    threading.Timer(2.0, _apply_creds, args=(cr,)).start()  # config.json → перезапуск этого фронта
+    return "вход в iiko проверен; доступ разослан всем фронтам в зашифрованном виде" + ("; пароль убран из установщика" if san else "")
+
+SETUP_IIKO_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Доступ к iiko</title>
+<style>body{font:17px/1.5 'Segoe UI',sans-serif;background:#3F4040;color:#eee;display:flex;justify-content:center;padding:40px}
+.b{background:#323539;border:1px solid #494D53;border-radius:8px;padding:28px 32px;max-width:640px}
+input{width:100%;font-size:18px;padding:10px;border-radius:4px;border:1px solid #777;background:#222;color:#fff;margin:4px 0 12px}
+button{margin-top:6px;font-size:18px;padding:12px 26px;background:#E3E982;border:none;border-radius:4px;cursor:pointer;font-weight:700}
+#m{margin-top:14px;min-height:24px}</style></head><body><div class="b">
+<h2>Доступ фронтов к iiko</h2>
+<p>Введите логин и <b>новый</b> пароль пользователя iiko, под которым работают фронты. Программа проверит вход в iiko и разошлёт доступ всем допущенным компьютерам в зашифрованном виде — вписывать его на каждом не нужно.</p>
+<label>Логин</label><input id="l" autocomplete="off">
+<label>Пароль</label><input id="p" type="password" autocomplete="new-password">
+<button id="s">Проверить и разослать</button><div id="m"></div>
+<script>fetch('/api/iiko-login').then(x=>x.json()).then(r=>{document.getElementById('l').value=r.login||'';document.getElementById('p').focus();});
+document.getElementById('s').onclick=async()=>{const m=document.getElementById('m');m.style.color='#eee';m.textContent='Проверяю вход в iiko…';
+try{const r=await fetch('/api/setup-iiko',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:document.getElementById('l').value,password:document.getElementById('p').value})}).then(x=>x.json());
+m.style.color=r.ok?'#9BE29B':'#FF8A80';m.textContent=r.result||r.error;if(r.ok)document.getElementById('p').value='';}catch(e){m.style.color='#FF8A80';m.textContent='Ошибка: '+e;}};</script>
+</div></body></html>"""
+
 def fleet_approve(pcid):
     if not (is_owner_admin() and fleet_key()):
         raise Exception("сначала включите шифрование на компьютере владельца")
@@ -1222,6 +1289,15 @@ def pull_banquets():
         except Exception:
             pass
         pcs[d.get("pc") or name] = d
+    cf = (g.get("files") or {}).get(CREDS_FILE)
+    if cf and fleet_key():
+        try:
+            ctxt = cf.get("content")
+            if cf.get("truncated") and cf.get("raw_url"):
+                ctxt = urllib.request.urlopen(cf["raw_url"], timeout=60).read().decode("utf-8")
+            _apply_creds(fleet_open(json.loads(ctxt)))
+        except Exception as ex:
+            log("Доступ к iiko из общего списка не прочитан: %s" % ex)
     doc_set("shared/banquets", {"pcs": pcs, "updatedAt": datetime.datetime.now().isoformat(timespec="seconds")})
     n = sum(len(p.get("items") or []) for p in pcs.values())
     return "компьютеров: %d, банкетов: %d" % (len(pcs), n)
@@ -1641,6 +1717,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 lines = ["нет лога: %s" % e]
             return self._send(200, "".join(lines), "text/plain; charset=utf-8")
+        if p.path == "/setup-iiko":
+            return self._send(200, SETUP_IIKO_HTML, "text/html; charset=utf-8")
+        if p.path == "/api/iiko-login":
+            return self._send(200, json.dumps({"login": CFG.get("iiko_login") or ""}, ensure_ascii=False))
         if p.path == "/setup-update-token":
             return self._send(200, SETUP_UPDATE_TOKEN_HTML, "text/html; charset=utf-8")
         if p.path == "/setup-token":
@@ -1812,6 +1892,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, '{"result":"restarting"}')
             if p.path == "/api/akty":
                 return self._send(200, json.dumps({"result": run_akty()}, ensure_ascii=False))
+            if p.path == "/api/setup-iiko":
+                ln = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
+                try:
+                    return self._send(200, json.dumps({"ok": True, "result": setup_iiko(body.get("login"), body.get("password"))}, ensure_ascii=False))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": "Не сохранено: %s" % e}, ensure_ascii=False))
             if p.path == "/api/setup-update-token":
                 ln = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")

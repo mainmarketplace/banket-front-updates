@@ -1,10 +1,10 @@
 {
- "version": "2026.11.23.3",
+ "version": "2026.11.23.4",
  "files": {
   "server.py": {
    "url": "https://raw.githubusercontent.com/mainmarketplace/banket-front-updates/main/server.py",
-   "sha256": "ff35a568a0bc566bcf62876443b228c9b16f2465a1e69fd5b1f7b36331726610",
-   "size": 113550
+   "sha256": "5848e7c6b48f6c7e4ca21a033bc58a1f25a9c9faabdba9ca8ff2a97fca970940",
+   "size": 120142
   },
   "front.html": {
    "url": "https://raw.githubusercontent.com/mainmarketplace/banket-front-updates/main/front.html",
