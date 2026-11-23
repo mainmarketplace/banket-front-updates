@@ -1481,15 +1481,20 @@ def _run_akty(shift_id=None):
             comment = "Банкет %s, %s, фронт %s. Итог %s" % (
                 b.get("date"), (b.get("client") or {}).get("name", ""), fr.get("name"), bq_totals(b))
             # Строго по описанию iiko (salesDocumentDto): склад указывается в каждой строке;
-            # полей «концепция» и «комментарий» в акте реализации у iiko нет.
+            # «концепция» и «комментарий» в описании акта (версия 3.9) не значатся, но в окне iiko они есть,
+            # а в расходной накладной называются conceptionId и comment — отправляем под этими именами.
             doc_no = "BF-%s" % (b.get("num") or x["id"][:8])
             xml_body = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 "<document>"
                 "<status>NEW</status>"
                 "<documentNumber>%s</documentNumber>"
                 "<dateIncoming>%sT20:00:00</dateIncoming>"
+                "%s"
+                "<comment>%s</comment>"
                 "<items>%s</items>"
-                "</document>") % (xml_escape(doc_no), b.get("date"), "".join(items_xml))
+                "</document>") % (xml_escape(doc_no), b.get("date"),
+                                  ("<conceptionId>%s</conceptionId>" % conc_id) if conc_id else "",
+                                  xml_escape(comment), "".join(items_xml))
             fn = os.path.join(LOG_DIR, "akt-%s-%s.xml" % (b.get("date"), x["id"][:8]))
             with open(fn, "w", encoding="utf-8") as f:
                 f.write(xml_body)
