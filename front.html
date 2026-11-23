@@ -1175,7 +1175,8 @@ async function drawPcs(){
       else if(pc.self){ rdCell='<span style="color:#2A7">управляющий — этот компьютер</span>'; }
       else if(r&&r.id){ rdCell=(d.canConnect?'<button class="wtile rdc" data-pc="'+esc(pc.pc||'')+'" data-host="'+esc(pc.host||'')+'" style="padding:6px 14px">Подключиться</button>':'ID '+esc(r.id))+(r.status?'<br><small style="color:#888">'+esc(r.status)+'</small>':''); }
       else { rdCell='<span style="color:#C80">RustDesk ещё не готов</span>'+(r&&r.status?'<br><small style="color:#888">'+esc(r.status)+'</small>':''); }
-      return '<tr><td><b>'+esc(pc.host||pc.pc||'')+'</b>'+(pc.banquets!=null?'<br><small style="color:#888">банкетов: '+pc.banquets+'</small>':'')+'</td><td>'+esc(st&&st.version||'—')+'</td><td>'+link+'</td><td>'+waitTxt+'</td><td style="font-size:13px">'+last+'</td><td style="font-size:13px">'+rdCell+'</td></tr>';
+      const fl=(!pc.self&&d.fleetOn&&!pc.granted&&(pc.plain||pc.locked))?('<br><span style="color:#C22;font-size:13px">не допущен к ключу кафе</span>'+(d.canGrant&&pc.devicePub?' <button class="wtile fadm" data-pc="'+esc(pc.pc||'')+'" data-host="'+esc(pc.host||'')+'" style="padding:4px 12px">Допустить</button>':(d.canGrant?'<br><small style="color:#888">ждёт обновления программы</small>':''))):'';
+      return '<tr><td><b>'+esc(pc.host||pc.pc||'')+'</b>'+(pc.banquets!=null?'<br><small style="color:#888">банкетов: '+pc.banquets+'</small>':'')+fl+'</td><td>'+esc(st&&st.version||'—')+'</td><td>'+link+'</td><td>'+waitTxt+'</td><td style="font-size:13px">'+last+'</td><td style="font-size:13px">'+rdCell+'</td></tr>';
     }).join('')+'</tbody></table><p class="muted">Акт реализации уходит в iiko через 2 минуты после закрытия банкета, оплата — сразу. Если iiko недоступен, программа повторяет сама: через 3, 6, 12 минут и дальше не реже раза в час.</p>';
     if(isOwner()){
       const ctl=document.createElement('div');
@@ -1183,7 +1184,17 @@ async function drawPcs(){
         ? '<p>Удалённый доступ <b style="color:#2A7">включён</b> — этот компьютер управляющий, с него и подключайтесь. <button class="wtile" id="rd_off" style="padding:6px 14px;margin-left:6px">Выключить</button> <span id="rd_msg" class="muted" style="margin-left:8px"></span></p>'
         : '<p>Удалённый доступ выключен. Включите его на <b>этом</b> компьютере — тогда сможете одной кнопкой подключаться к остальным. <button class="wtile" id="rd_on" style="padding:8px 18px">Включить</button> <span id="rd_msg" class="muted" style="margin-left:8px"></span></p>';
       box.appendChild(ctl);
+      if(d.canGrant){
+        const fc=document.createElement('div');
+        fc.innerHTML = d.fleetOn
+          ? '<p>Общий список (банкеты, телефоны, PIN-коды) <b style="color:#2A7">зашифрован</b> ключом кафе. Новый компьютер после установки появится здесь — нажмите у него «Допустить».</p>'
+          : '<p>Общий список (банкеты, телефоны клиентов, PIN-коды) пока <b style="color:#C22">не зашифрован</b>. <button class="wtile" id="fl_on" style="padding:8px 18px">Зашифровать</button> <span id="fl_msg" class="muted" style="margin-left:8px"></span></p>';
+        box.appendChild(fc);
+      }
     }
+    const _flOn=$('#fl_on');
+    if(_flOn)_flOn.onclick=async()=>{const m=$('#fl_msg');_flOn.disabled=true;if(m)m.textContent='Шифрую…';try{const r=await fetch('/api/fleet/enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({by:S.user&&S.user.id})}).then(x=>x.json());if(m)m.textContent=r.ok?r.result:('Не вышло: '+(r.error||''));}catch(e){if(m)m.textContent='Ошибка: '+e;}_flOn.disabled=false;setTimeout(drawPcs,3000);};
+    box.querySelectorAll('.fadm').forEach(b=>b.onclick=async()=>{b.disabled=true;try{const r=await fetch('/api/fleet/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({by:S.user&&S.user.id,pc:b.dataset.pc})}).then(x=>x.json());alert(r.ok?r.result:('Не вышло: '+(r.error||'')));}catch(e){alert('Ошибка: '+e);}setTimeout(drawPcs,1500);});
     box.querySelectorAll('.rdc').forEach(b=>b.onclick=async()=>{
       const msg=$('#rd_msg'); b.disabled=true; if(msg)msg.textContent='Открываю RustDesk…';
       try{const r=await fetch('/api/remote/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({by:S.user&&S.user.id,pc:b.dataset.pc})}).then(x=>x.json());

@@ -439,6 +439,8 @@ def _check_update(force=False):
         return "манифест без версии"
     if ver == local_version() and not force:
         return "установлена последняя версия " + ver
+    if _ver_tuple(ver) < _ver_tuple(local_version()):
+        return "на сервере обновлений версия %s старее установленной %s — не откатываю" % (ver, local_version())
     changed = []
     UPDATING[0] = True
     for name, info in (man.get("files") or {}).items():
@@ -536,11 +538,18 @@ def load_shared_pins():
             txt = f.get("content") or "{}"
             if f.get("truncated") and f.get("raw_url"):
                 txt = urllib.request.urlopen(f["raw_url"], timeout=60).read().decode("utf-8")
-            return json.loads(txt) or {}
-        return json.loads(gist_raw(name)) or {}
+            return _pins_decode(json.loads(txt) or {})
+        return _pins_decode(json.loads(gist_raw(name)) or {})
     except Exception as ex:
         log("Общий список PIN недоступен: %s" % ex)
         return None
+
+def _pins_decode(obj):
+    if is_box(obj):
+        if not fleet_key():
+            raise Exception("PIN-коды зашифрованы, а ключа кафе на этом компьютере ещё нет — нужен допуск владельца")
+        return fleet_open(obj) or {}
+    return obj
 
 _tok_cache = {"t": "", "at": 0}
 def gist_token():
@@ -670,8 +679,52 @@ def _set_shared_pin(emp_id, pin):
         shared[emp_id] = pin
     else:
         shared.pop(emp_id, None)
-    gist_api("PATCH", files={CFG.get("pins_file", "pins.json"): {"content": json.dumps(shared, ensure_ascii=False, indent=1)}}, token=tok)
+    body = fleet_seal(shared) if fleet_key() else shared
+    gist_api("PATCH", files={CFG.get("pins_file", "pins.json"): {"content": json.dumps(body, ensure_ascii=False, indent=1)}}, token=tok)
     return shared
+
+def fleet_enable():
+    """Владелец включает шифрование: создаётся ключ кафе, допускаются все работающие компьютеры, PIN-коды перешифровываются."""
+    if not is_owner_admin():
+        raise Exception("включать шифрование можно только с компьютера владельца (там, где включён удалённый доступ)")
+    sync_banquets(force=True)
+    pcs = (doc_get("shared/banquets") or {}).get("pcs") or {}
+    behind, ok = [], {}
+    for pcid, d in pcs.items():
+        if d.get("stale"):
+            continue
+        ver = _ver_tuple((d.get("state") or {}).get("version"))
+        if ver < FLEET_MIN_VERSION or not d.get("devicePub"):
+            behind.append("%s (версия %s)" % (d.get("host") or pcid, (d.get("state") or {}).get("version") or "старая"))
+        else:
+            ok[pcid] = {"pub": d["devicePub"], "host": d.get("host")}
+    if behind:
+        raise Exception("сначала должны обновиться: " + ", ".join(behind) + " — подождите до часа и попробуйте снова")
+    with _pin_lock:
+        plain = load_shared_pins()
+        if plain is None:
+            raise Exception("не удалось прочитать PIN-коды — шифрование не включено")
+        if not fleet_key():
+            doc_set("secure/fleet", {"key": os.urandom(32).hex(), "at": datetime.datetime.now().isoformat(timespec="seconds")})
+        gr = doc_get("secure/fleet_grants") or {"items": {}}
+        gr.setdefault("items", {}).update(ok)
+        doc_set("secure/fleet_grants", gr)
+        gist_api("PATCH", files={CFG.get("pins_file", "pins.json"): {"content": json.dumps(fleet_seal(plain), ensure_ascii=False, indent=1)}})
+    sync_banquets(force=True)
+    names = [v.get("host") for v in ok.values()]
+    return "общий список зашифрован; допущены: %s" % (", ".join(names) if names else "только этот компьютер")
+
+def fleet_approve(pcid):
+    if not (is_owner_admin() and fleet_key()):
+        raise Exception("сначала включите шифрование на компьютере владельца")
+    d = ((doc_get("shared/banquets") or {}).get("pcs") or {}).get(pcid) or {}
+    if not d.get("devicePub"):
+        raise Exception("этот компьютер ещё не прислал свой ключ — пусть обновится до новой версии")
+    gr = doc_get("secure/fleet_grants") or {"items": {}}
+    gr.setdefault("items", {})[pcid] = {"pub": d["devicePub"], "host": d.get("host")}
+    doc_set("secure/fleet_grants", gr)
+    sync_banquets(force=True)
+    return "компьютер %s допущен — получит ключ кафе в течение нескольких минут" % (d.get("host") or pcid)
 
 SHARED = {"settings": {}, "at": 0}
 def load_shared_settings():
@@ -806,16 +859,93 @@ def is_admin_pc():
     return bool(priv and pub)
 def remote_on():
     return bool((doc_get("secure/remote_admin") or {}).get("on"))
-def known_admin_pub():
+# Открытый ключ компьютера владельца (DESKTOP-P5FCAAV). Зашит в программу: менять программу на GitHub
+# может только владелец, а в общий список писать может любой, кто знает его адрес. Поэтому пароли
+# RustDesk и выдачу ключа кафе компьютеры доверяют только этому ключу. Если компьютер владельца
+# переустановят — нужно выпустить обновление с новым ключом.
+OWNER_ADMIN_PUB = "b91ab0e8147a53d80874a7161ba43b410388f183f546ccfacf9165c6819f7e62"
+def is_owner_admin():
     priv, pub = admin_keys()
-    if pub and remote_on():
-        return pub
-    best = None
+    return bool(priv and pub == OWNER_ADMIN_PUB)
+def known_admin_pub():
+    if is_owner_admin() and remote_on():
+        return OWNER_ADMIN_PUB
     for d in ((doc_get("shared/banquets") or {}).get("pcs") or {}).values():
         a = d.get("admin") or {}
-        if a.get("on") and a.get("pub"):
-            best = a["pub"]
-    return best
+        if a.get("on") and a.get("pub") == OWNER_ADMIN_PUB:
+            return OWNER_ADMIN_PUB
+    return None
+
+# ==================== Ключ кафе: шифрование общего списка ====================
+# Банкеты (телефоны клиентов), состояние компьютеров и PIN-коды в общем gist шифруются ключом кафе.
+# Ключ кафе есть только у допущенных компьютеров. Новый компьютер получает его, когда владелец
+# нажимает «Допустить»: ключ запечатывается на ключ устройства, и проверить, что выдал его именно
+# владелец, можно по OWNER_ADMIN_PUB (подделать выдачу нельзя).
+_FLEET_INFO = b"banket-fleet-v1"
+_GRANT_INFO = b"banket-fleet-grant-v1"
+FLEET_MIN_VERSION = (2026, 11, 23, 3)
+def _b64e(x):
+    import base64; return base64.b64encode(x).decode()
+def _b64d(x):
+    import base64; return base64.b64decode(x)
+def _xor(a, b):
+    return (int.from_bytes(a, "big") ^ int.from_bytes(b, "big")).to_bytes(len(a), "big") if a else b""
+def _sym_seal(key, data, info):
+    nonce = os.urandom(16); kk = _hkdf(key, nonce, info, 64); ek, mk = kk[:32], kk[32:]
+    ct = _xor(data, _keystream(ek, nonce, len(data)))
+    tag = _hmac.new(mk, nonce + ct, hashlib.sha256).digest()
+    return {"fv": 1, "nonce": _b64e(nonce), "ct": _b64e(ct), "tag": _b64e(tag)}
+def _sym_open(key, box, info):
+    nonce, ct, tag = _b64d(box["nonce"]), _b64d(box["ct"]), _b64d(box["tag"])
+    kk = _hkdf(key, nonce, info, 64); ek, mk = kk[:32], kk[32:]
+    if not _hmac.compare_digest(_hmac.new(mk, nonce + ct, hashlib.sha256).digest(), tag):
+        raise ValueError("не подходит ключ кафе")
+    return _xor(ct, _keystream(ek, nonce, len(ct)))
+def is_box(d):
+    return isinstance(d, dict) and d.get("fv") == 1 and "ct" in d
+def fleet_key():
+    k = (doc_get("secure/fleet") or {}).get("key")
+    return bytes.fromhex(k) if k else None
+def fleet_seal(obj):
+    return _sym_seal(fleet_key(), json.dumps(obj, ensure_ascii=False).encode("utf-8"), _FLEET_INFO)
+def fleet_open(box):
+    return json.loads(_sym_open(fleet_key(), box, _FLEET_INFO).decode("utf-8"))
+def device_keys():
+    d = doc_get("secure/device") or {}
+    if not (d.get("priv") and d.get("pub")):
+        sk = os.urandom(32)
+        d = {"priv": sk.hex(), "pub": _x25519(sk, _X_BASE).hex(), "at": datetime.datetime.now().isoformat(timespec="seconds")}
+        doc_set("secure/device", d)
+    return d["priv"], d["pub"]
+def _grant_key(my_priv_hex, other_pub_hex, device_pub_hex):
+    shared = _x25519(bytes.fromhex(my_priv_hex), bytes.fromhex(other_pub_hex))
+    return _hkdf(shared, bytes.fromhex(OWNER_ADMIN_PUB) + bytes.fromhex(device_pub_hex), _GRANT_INFO, 32)
+def make_grant(device_pub_hex):
+    priv, pub = admin_keys()
+    return _sym_seal(_grant_key(priv, device_pub_hex, device_pub_hex), fleet_key().hex().encode(), _GRANT_INFO)
+def open_grant(box):
+    dpriv, dpub = device_keys()
+    return bytes.fromhex(_sym_open(_grant_key(dpriv, OWNER_ADMIN_PUB, dpub), box, _GRANT_INFO).decode())
+def fleet_grants_out():
+    """Выдачи ключа кафе (только на компьютере владельца), с кэшем, чтобы не менять файл без нужды."""
+    if not (is_owner_admin() and fleet_key()):
+        return None
+    gr = (doc_get("secure/fleet_grants") or {}).get("items") or {}
+    cache = doc_get("secure/fleet_grant_cache") or {}
+    out = {}; changed = False
+    for pcid, g in gr.items():
+        c = cache.get(pcid) or {}
+        if c.get("pub") == g.get("pub") and c.get("box"):
+            out[pcid] = c["box"]
+        else:
+            out[pcid] = make_grant(g["pub"]); cache[pcid] = {"pub": g["pub"], "box": out[pcid]}; changed = True
+    if changed:
+        doc_set("secure/fleet_grant_cache", cache)
+    return out
+def _ver_tuple(v):
+    try: return tuple(int(x) for x in str(v).split("."))
+    except Exception: return (0,)
+# ==================== конец блока ключа кафе ====================
 
 RD_DIR = os.path.join(BASE, "rustdesk")
 RD_EXE = os.path.join(RD_DIR, "rustdesk.exe")
@@ -1014,8 +1144,19 @@ def push_banquets(force=False):
     _apriv, _apub = admin_keys()
     if _apub and remote_on():
         payload["admin"] = {"pub": _apub, "on": True}
-    rsig = "%s|%s|%s" % ((rp or {}).get("id", ""), (payload.get("admin") or {}).get("pub", ""), "enc" if (rp or {}).get("enc") else "")
-    body_txt = json.dumps(payload, ensure_ascii=False, indent=0)
+    _dpriv, _dpub = device_keys()
+    grants = fleet_grants_out()
+    rsig = "%s|%s|%s|%s|%s" % ((rp or {}).get("id", ""), (payload.get("admin") or {}).get("pub", ""),
+                               "enc" if (rp or {}).get("enc") else "", ",".join(sorted((grants or {}).keys())), "F" if fleet_key() else "")
+    if fleet_key():
+        outer = {"pc": pid, "host": payload["host"], "updatedAt": payload["updatedAt"], "devicePub": _dpub,
+                 "enc": fleet_seal(payload)}
+        if payload.get("admin"): outer["admin"] = payload["admin"]
+        if grants: outer["grants"] = grants
+        body_txt = json.dumps(outer, ensure_ascii=False, indent=0)
+    else:
+        payload["devicePub"] = _dpub
+        body_txt = json.dumps(payload, ensure_ascii=False, indent=0)
     h = hashlib.sha256((json.dumps(items, ensure_ascii=False, sort_keys=True) + _state_sign(state) + rsig).encode()).hexdigest()
     SELF_PC.update({k: payload[k] for k in ("pc", "host", "state")})
     if h == _bq_push_hash[0] and not force and time.time() - _bq_push_at[0] < HEARTBEAT_SEC:
@@ -1052,6 +1193,25 @@ def pull_banquets():
             continue
         if d.get("pc") == pid:
             continue
+        if not fleet_key() and (d.get("grants") or {}).get(pid):
+            try:
+                k = open_grant(d["grants"][pid])
+                doc_set("secure/fleet", {"key": k.hex(), "at": datetime.datetime.now().isoformat(timespec="seconds")})
+                log("Получен ключ кафе от компьютера владельца — общий список теперь шифруется")
+            except Exception as ex:
+                log("Выдача ключа кафе не подошла: %s" % ex)
+        if d.get("enc"):
+            outer = {k: d.get(k) for k in ("pc", "host", "updatedAt", "devicePub", "admin", "grants")}
+            inner = None
+            if fleet_key():
+                try: inner = fleet_open(d["enc"])
+                except Exception as ex: log("Файл %s не расшифрован: %s" % (name, ex))
+            if inner is None:
+                d = dict(outer, items=[], locked=True)
+            else:
+                d = dict(inner); d.update({k: v for k, v in outer.items() if v is not None}); d["sealed"] = True
+        else:
+            d["plain"] = True
         try:  # брошенные файлы (компьютер переустановлен) старше 30 дней не показываем
             age = datetime.datetime.now() - datetime.datetime.fromisoformat(d.get("updatedAt"))
             if age.days > 30:
@@ -1573,13 +1733,16 @@ class Handler(BaseHTTPRequestHandler):
                 others.append({"pc": d.get("pc"), "host": d.get("host"), "updatedAt": d.get("updatedAt"),
                                "state": d.get("state"), "banquets": len(its),
                                "aktWait": len([i for i in its if i.get("status") == "closed" and i.get("iikoStatus") == "pending"]),
-                               "remote": {"id": rem.get("id"), "status": rem.get("status"), "hasEnc": bool(rem.get("enc"))}})
+                               "remote": {"id": rem.get("id"), "status": rem.get("status"), "hasEnc": bool(rem.get("enc"))},
+                               "devicePub": bool(d.get("devicePub")), "locked": bool(d.get("locked")), "plain": bool(d.get("plain")),
+                               "granted": d.get("pc") in (((doc_get("secure/fleet_grants") or {}).get("items")) or {})})
             others.sort(key=lambda d: d.get("updatedAt") or "", reverse=True)
             me["remote"] = {"id": RD.get("id"), "status": RD.get("status")}
             return self._send(200, json.dumps({"now": datetime.datetime.now().isoformat(timespec="seconds"),
                                                "pulledAt": sh.get("updatedAt"),
                                                "remoteOn": bool(remote_on() or known_admin_pub()),
                                                "canConnect": is_admin_pc(),
+                                               "fleetOn": bool(fleet_key()), "canGrant": is_owner_admin(),
                                                "pcs": [me] + others}, ensure_ascii=False))
         if p.path == "/api/status":
             return self._send(200, json.dumps({
@@ -1706,6 +1869,16 @@ class Handler(BaseHTTPRequestHandler):
                     refresh_pins()
                     log("PIN в общий список не записан: %s" % e)
                     return self._send(200, json.dumps({"ok": True, "shared": False, "result": str(e)}, ensure_ascii=False))
+            if p.path in ("/api/fleet/enable", "/api/fleet/approve"):
+                ln = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
+                if (body.get("by") or "") not in CFG.get("pin_admins", [OWNER_ID]):
+                    return self._send(403, json.dumps({"error": "шифрованием управляет только владелец"}, ensure_ascii=False))
+                try:
+                    r = fleet_enable() if p.path == "/api/fleet/enable" else fleet_approve(body.get("pc"))
+                    return self._send(200, json.dumps({"ok": True, "result": r}, ensure_ascii=False))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             if p.path in ("/api/remote/enable", "/api/remote/disable", "/api/remote/connect"):
                 ln = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
