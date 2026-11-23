@@ -1089,6 +1089,23 @@ def rd_setup():
         except Exception as e:
             RD.update(ok=False, status="ошибка установки: %s" % str(e)[:200])
             log("RustDesk установка: %s" % e)
+def keep_awake_loop():
+    """Пока включён удалённый доступ, просим Windows не засыпать (экран гаснуть может).
+    Иначе к спящему компьютеру не подключиться. На компьютере владельца не действует."""
+    if os.name != "nt":
+        return
+    import ctypes
+    state = None
+    while True:
+        try:
+            want = bool(known_admin_pub()) and not is_owner_admin()
+            if want != state:
+                ctypes.windll.kernel32.SetThreadExecutionState(0x80000001 if want else 0x80000000)
+                state = want
+                log("Запрет сна: %s" % ("включён" if want else "выключен"))
+        except Exception as e:
+            log("Запрет сна: %s" % e)
+        time.sleep(60)
 def rd_tick():
     if not (remote_on() or known_admin_pub()):
         if RD["status"] != "выключено": RD.update(status="выключено", ok=False)
@@ -1446,7 +1463,6 @@ def _run_akty(shift_id=None):
             conc_id = concs.get((fr.get("conception") or "").strip())
             problems = []
             if not store_id: problems.append("склад «%s» не найден" % fr.get("store"))
-            if not conc_id: problems.append("концепция «%s» не найдена" % fr.get("conception"))
             items_xml = []
             for it in b.get("items", []):
                 pid = it.get("productId") or prods.get((it.get("name") or "").strip())
@@ -1455,8 +1471,8 @@ def _run_akty(shift_id=None):
                     continue
                 s = round(float(it.get("price") or 0) * float(it.get("qty") or 0), 2)
                 items_xml.append(
-                    "<item><productId>%s</productId><amount>%s</amount><sum>%s</sum></item>"
-                    % (pid, it.get("qty"), s))
+                    "<item><amount>%s</amount><storeId>%s</storeId><productId>%s</productId><sum>%s</sum></item>"
+                    % (it.get("qty"), store_id, pid, s))
             if problems:
                 skipped.append("банкет %s (%s): %s" % (b.get("date"),
                     (b.get("client") or {}).get("name", ""), "; ".join(problems)))
@@ -1464,15 +1480,16 @@ def _run_akty(shift_id=None):
                 continue
             comment = "Банкет %s, %s, фронт %s. Итог %s" % (
                 b.get("date"), (b.get("client") or {}).get("name", ""), fr.get("name"), bq_totals(b))
+            # Строго по описанию iiko (salesDocumentDto): склад указывается в каждой строке;
+            # полей «концепция» и «комментарий» в акте реализации у iiko нет.
+            doc_no = "BF-%s" % (b.get("num") or x["id"][:8])
             xml_body = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 "<document>"
-                "<dateIncoming>%sT20:00:00</dateIncoming>"
                 "<status>NEW</status>"
-                "<storeId>%s</storeId>"
-                "<conceptionId>%s</conceptionId>"
-                "<comment>%s</comment>"
+                "<documentNumber>%s</documentNumber>"
+                "<dateIncoming>%sT20:00:00</dateIncoming>"
                 "<items>%s</items>"
-                "</document>") % (b.get("date"), store_id, conc_id, xml_escape(comment), "".join(items_xml))
+                "</document>") % (xml_escape(doc_no), b.get("date"), "".join(items_xml))
             fn = os.path.join(LOG_DIR, "akt-%s-%s.xml" % (b.get("date"), x["id"][:8]))
             with open(fn, "w", encoding="utf-8") as f:
                 f.write(xml_body)
@@ -2126,6 +2143,7 @@ def main():
     threading.Thread(target=ensure_branding, daemon=True).start()
     threading.Thread(target=scheduler, daemon=True).start()
     threading.Thread(target=code_watcher, daemon=True).start()
+    threading.Thread(target=keep_awake_loop, daemon=True).start()
     log("Банкетный фронт запущен: http://localhost:%d" % port)
     if not (CFG.get("iiko_login") and CFG.get("iiko_password")):
         log("ВНИМАНИЕ: iiko_login/iiko_password не заполнены в config.json — синк цен и акты отключены.")
