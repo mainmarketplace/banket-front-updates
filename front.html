@@ -1155,7 +1155,7 @@ async function drawPcs(){
     const now=new Date(d.now||Date.now());
     const ago=iso=>{if(!iso)return null;return Math.round((now-new Date(iso))/60000);};
     const agoTxt=m=>m==null?'—':m<2?'только что':m<90?m+' мин назад':m<48*60?Math.round(m/60)+' ч назад':Math.round(m/1440)+' дн назад';
-    box.innerHTML='<table><thead><tr><th>Компьютер</th><th style="width:110px">Версия</th><th style="width:190px">Был на связи</th><th style="width:170px">Ждёт отправки в iiko</th><th>Последняя отправка</th></tr></thead><tbody>'+
+    box.innerHTML='<table><thead><tr><th>Компьютер</th><th style="width:110px">Версия</th><th style="width:190px">Был на связи</th><th style="width:170px">Ждёт отправки в iiko</th><th>Последняя отправка</th><th style="width:170px">Удалённый доступ</th></tr></thead><tbody>'+
     (d.pcs||[]).map(pc=>{
       const st=pc.state||null, m=pc.self?0:ago(pc.updatedAt);
       const wait=st?(st.aktWait||0):(pc.aktWait||0), pw=st?(st.payWait||0):0;
@@ -1170,8 +1170,29 @@ async function drawPcs(){
          +(st.lastAkt?'<small>'+ruDT(st.lastAkt)+'</small> '+esc(st.lastAktResult||''):'ещё не отправлял')
          +(st.lastPayResult?'<br><small>'+ruDT(st.lastPay)+'</small> '+esc(st.lastPayResult):'')
          +((st.errors||[]).length?'<br><span style="color:#C22">'+st.errors.map(esc).join('<br>')+'</span>':'');
-      return '<tr><td><b>'+esc(pc.host||pc.pc||'')+'</b>'+(pc.banquets!=null?'<br><small style="color:#888">банкетов: '+pc.banquets+'</small>':'')+'</td><td>'+esc(st&&st.version||'—')+'</td><td>'+link+'</td><td>'+waitTxt+'</td><td style="font-size:13px">'+last+'</td></tr>';
+      const r=pc.remote||null; let rdCell;
+      if(!d.remoteOn){ rdCell='<span class="muted" style="color:#888">выключено</span>'; }
+      else if(pc.self){ rdCell='<span style="color:#2A7">управляющий — этот компьютер</span>'; }
+      else if(r&&r.id){ rdCell=(d.canConnect?'<button class="wtile rdc" data-pc="'+esc(pc.pc||'')+'" data-host="'+esc(pc.host||'')+'" style="padding:6px 14px">Подключиться</button>':'ID '+esc(r.id))+(r.status?'<br><small style="color:#888">'+esc(r.status)+'</small>':''); }
+      else { rdCell='<span style="color:#C80">RustDesk ещё не готов</span>'+(r&&r.status?'<br><small style="color:#888">'+esc(r.status)+'</small>':''); }
+      return '<tr><td><b>'+esc(pc.host||pc.pc||'')+'</b>'+(pc.banquets!=null?'<br><small style="color:#888">банкетов: '+pc.banquets+'</small>':'')+'</td><td>'+esc(st&&st.version||'—')+'</td><td>'+link+'</td><td>'+waitTxt+'</td><td style="font-size:13px">'+last+'</td><td style="font-size:13px">'+rdCell+'</td></tr>';
     }).join('')+'</tbody></table><p class="muted">Акт реализации уходит в iiko через 2 минуты после закрытия банкета, оплата — сразу. Если iiko недоступен, программа повторяет сама: через 3, 6, 12 минут и дальше не реже раза в час.</p>';
+    if(isOwner()){
+      const ctl=document.createElement('div');
+      ctl.innerHTML = d.remoteOn
+        ? '<p>Удалённый доступ <b style="color:#2A7">включён</b> — этот компьютер управляющий, с него и подключайтесь. <button class="wtile" id="rd_off" style="padding:6px 14px;margin-left:6px">Выключить</button> <span id="rd_msg" class="muted" style="margin-left:8px"></span></p>'
+        : '<p>Удалённый доступ выключен. Включите его на <b>этом</b> компьютере — тогда сможете одной кнопкой подключаться к остальным. <button class="wtile" id="rd_on" style="padding:8px 18px">Включить</button> <span id="rd_msg" class="muted" style="margin-left:8px"></span></p>';
+      box.appendChild(ctl);
+    }
+    box.querySelectorAll('.rdc').forEach(b=>b.onclick=async()=>{
+      const msg=$('#rd_msg'); b.disabled=true; if(msg)msg.textContent='Открываю RustDesk…';
+      try{const r=await fetch('/api/remote/connect',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({by:S.user&&S.user.id,pc:b.dataset.pc})}).then(x=>x.json());
+        if(msg)msg.textContent=r.ok?('Открываю RustDesk — '+(b.dataset.host||'')):('Не вышло: '+(r.error||''));}
+      catch(e){if(msg)msg.textContent='Ошибка: '+e;} b.disabled=false;
+    });
+    const _on=$('#rd_on'),_off=$('#rd_off'),_msg=$('#rd_msg');
+    if(_on)_on.onclick=async()=>{_on.disabled=true;if(_msg)_msg.textContent='Включаю, ставлю RustDesk…';try{const r=await fetch('/api/remote/enable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({by:S.user&&S.user.id})}).then(x=>x.json());if(_msg)_msg.textContent=r.ok?r.result:('Не вышло: '+(r.error||''));}catch(e){if(_msg)_msg.textContent='Ошибка: '+e;}setTimeout(drawPcs,2000);};
+    if(_off)_off.onclick=async()=>{_off.disabled=true;try{const r=await fetch('/api/remote/disable',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({by:S.user&&S.user.id})}).then(x=>x.json());if(_msg)_msg.textContent=r.ok?r.result:('Не вышло: '+(r.error||''));}catch(e){if(_msg)_msg.textContent='Ошибка: '+e;}setTimeout(drawPcs,800);};
   }catch(e){box.innerHTML='<p class="muted">Состояние компьютеров недоступно (запущено без сервера).</p>';}
 }
 async function renderSettings(scr,bar){

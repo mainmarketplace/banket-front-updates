@@ -643,6 +643,224 @@ def refresh_pins(shared=None):
 
 # ---------------- общий список банкетов всех залов ----------------
 SELF_PC = {}  # этот компьютер — для экрана «Компьютеры с фронтом»
+# ==================== Удалённый доступ через RustDesk ====================
+# Пароль RustDesk каждого компьютера шифруется «запечатанным конвертом» на открытый ключ
+# управляющего компьютера (компьютера владельца). В общий список уходит только шифртекст —
+# прочитать пароль может лишь компьютер владельца, у которого есть закрытый ключ. Ключ записи
+# к общему списку доступен всем фронтам, поэтому класть туда пароль открытым текстом нельзя.
+import hmac as _hmac, secrets as _secrets
+_P25519 = 2**255 - 19
+_X_BASE = (9).to_bytes(32, "little")
+def _x25519(k_bytes, u_bytes):
+    def _ds(k):
+        k = bytearray(k); k[0] &= 248; k[31] &= 127; k[31] |= 64
+        return int.from_bytes(k, "little")
+    def _du(u):
+        u = bytearray(u); u[31] &= 127
+        return int.from_bytes(u, "little")
+    k = _ds(k_bytes); x1 = _du(u_bytes)
+    x2, z2, x3, z3, swap, a24 = 1, 0, _du(u_bytes), 1, 0, 121665
+    for t in range(254, -1, -1):
+        kt = (k >> t) & 1; swap ^= kt
+        if swap: x2, x3 = x3, x2; z2, z3 = z3, z2
+        swap = kt
+        A = (x2 + z2) % _P25519; AA = (A*A) % _P25519
+        B = (x2 - z2) % _P25519; BB = (B*B) % _P25519
+        E = (AA - BB) % _P25519
+        C = (x3 + z3) % _P25519; D = (x3 - z3) % _P25519
+        DA = (D*A) % _P25519; CB = (C*B) % _P25519
+        x3 = pow((DA+CB) % _P25519, 2, _P25519); z3 = (x1 * pow((DA-CB) % _P25519, 2, _P25519)) % _P25519
+        x2 = (AA*BB) % _P25519; z2 = (E * ((AA + a24*E) % _P25519)) % _P25519
+    if swap: x2, x3 = x3, x2; z2, z3 = z3, z2
+    return ((x2 * pow(z2, _P25519-2, _P25519)) % _P25519).to_bytes(32, "little")
+def _hkdf(ikm, salt, info, length=64):
+    prk = _hmac.new(salt, ikm, hashlib.sha256).digest()
+    okm = b""; t = b""; i = 1
+    while len(okm) < length:
+        t = _hmac.new(prk, t + info + bytes([i]), hashlib.sha256).digest(); okm += t; i += 1
+    return okm[:length]
+_SEAL_INFO = b"banket-rustdesk-v1"
+def _keystream(key, nonce, n):
+    out = b""; c = 0
+    while len(out) < n:
+        out += _hmac.new(key, nonce + c.to_bytes(4, "big"), hashlib.sha256).digest(); c += 1
+    return out[:n]
+def seal_secret(recipient_pub_hex, plaintext):
+    import base64
+    rpub = bytes.fromhex(recipient_pub_hex)
+    esk = os.urandom(32); epk = _x25519(esk, _X_BASE); shared = _x25519(esk, rpub)
+    kk = _hkdf(shared, epk + rpub, _SEAL_INFO, 64); ek, mk = kk[:32], kk[32:]
+    nonce = os.urandom(16); pt = plaintext.encode("utf-8")
+    ct = bytes(a ^ b for a, b in zip(pt, _keystream(ek, nonce, len(pt))))
+    tag = _hmac.new(mk, epk + nonce + ct, hashlib.sha256).digest()
+    b = lambda x: base64.b64encode(x).decode()
+    return {"v": 1, "epk": b(epk), "nonce": b(nonce), "ct": b(ct), "tag": b(tag)}
+def unseal_secret(recipient_priv_hex, box):
+    import base64
+    d = lambda x: base64.b64decode(x)
+    priv = bytes.fromhex(recipient_priv_hex)
+    epk, nonce, ct, tag = d(box["epk"]), d(box["nonce"]), d(box["ct"]), d(box["tag"])
+    rpub = _x25519(priv, _X_BASE); shared = _x25519(priv, epk)
+    kk = _hkdf(shared, epk + rpub, _SEAL_INFO, 64); ek, mk = kk[:32], kk[32:]
+    if not _hmac.compare_digest(_hmac.new(mk, epk + nonce + ct, hashlib.sha256).digest(), tag):
+        raise ValueError("метка не совпала")
+    return bytes(a ^ b for a, b in zip(ct, _keystream(ek, nonce, len(ct)))).decode("utf-8")
+
+def admin_keys():
+    d = doc_get("secure/remote_admin") or {}
+    return d.get("priv"), d.get("pub")
+def ensure_admin_keys():
+    priv, pub = admin_keys()
+    if priv and pub:
+        return priv, pub
+    sk = os.urandom(32); pk = _x25519(sk, _X_BASE)
+    d = doc_get("secure/remote_admin") or {}
+    d.update(priv=sk.hex(), pub=pk.hex(), createdAt=datetime.datetime.now().isoformat(timespec="seconds"))
+    doc_set("secure/remote_admin", d)
+    return d["priv"], d["pub"]
+def is_admin_pc():
+    priv, pub = admin_keys()
+    return bool(priv and pub)
+def remote_on():
+    return bool((doc_get("secure/remote_admin") or {}).get("on"))
+def known_admin_pub():
+    priv, pub = admin_keys()
+    if pub and remote_on():
+        return pub
+    best = None
+    for d in ((doc_get("shared/banquets") or {}).get("pcs") or {}).values():
+        a = d.get("admin") or {}
+        if a.get("on") and a.get("pub"):
+            best = a["pub"]
+    return best
+
+RD_DIR = os.path.join(BASE, "rustdesk")
+RD_EXE = os.path.join(RD_DIR, "rustdesk.exe")
+RD = {"id": "", "pw": "", "status": "выключено", "ok": False, "ver": "", "at": 0}
+_RD_LOCK = threading.Lock()
+_RD_PROC = [None]
+def _rd_run(args, timeout=60, capture=False):
+    import subprocess
+    flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
+    return subprocess.run([RD_EXE] + args, cwd=RD_DIR, capture_output=capture, text=True,
+                          timeout=timeout, creationflags=flags)
+def _rd_download():
+    os.makedirs(RD_DIR, exist_ok=True)
+    rel = json.loads(urllib.request.urlopen("https://api.github.com/repos/rustdesk/rustdesk/releases/latest", timeout=60).read().decode())
+    ver = rel.get("tag_name", ""); url = None
+    for a in rel.get("assets") or []:
+        if re.match(r"^rustdesk-[0-9.]+-x86_64\.exe$", a.get("name") or ""):
+            url = a.get("browser_download_url"); break
+    if not url:
+        raise Exception("в последнем выпуске RustDesk не найден установщик для Windows")
+    data = urllib.request.urlopen(url, timeout=600).read()
+    with open(RD_EXE, "wb") as f:
+        f.write(data)
+    RD["ver"] = ver
+    log("RustDesk %s скачан (%d КБ)" % (ver, len(data)//1024))
+def _rd_read_id():
+    try:
+        r = _rd_run(["--get-id"], timeout=30, capture=True)
+        out = (r.stdout or "").strip().splitlines()
+        if out and out[-1].strip().isdigit():
+            return out[-1].strip()
+    except Exception:
+        pass
+    for p in [os.path.join(os.environ.get("APPDATA", ""), "RustDesk", "config", "RustDesk.toml"),
+              r"C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk.toml"]:
+        try:
+            for line in open(p, encoding="utf-8"):
+                line = line.strip()
+                if line.startswith("id") and "=" in line:
+                    v = line.split("=", 1)[1].strip().strip("'\"")
+                    if v.isdigit():
+                        return v
+        except Exception:
+            pass
+    return ""
+def _rd_ensure_running():
+    import subprocess
+    p = _RD_PROC[0]
+    if p and p.poll() is None:
+        return
+    flags = 0x08000000 | 0x00000008 if os.name == "nt" else 0  # CREATE_NO_WINDOW|DETACHED
+    try:
+        _RD_PROC[0] = subprocess.Popen([RD_EXE, "--service"], cwd=RD_DIR, creationflags=flags, close_fds=True)
+    except Exception as e:
+        log("RustDesk запуск фоновой службы: %s" % e)
+def rd_setup():
+    """Поставить (если надо) RustDesk, задать постоянный пароль, узнать ID, запустить приём подключений.
+    Пароль — случайный, свой на каждом компьютере, хранится локально и уходит в общий список только зашифрованным."""
+    if os.name != "nt":
+        RD.update(status="только Windows", ok=False); return
+    with _RD_LOCK:
+        sec = doc_get("secure/rustdesk") or {}
+        pw = sec.get("pw") or "".join(_secrets.choice("ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789") for _ in range(16))
+        try:
+            if not os.path.exists(RD_EXE):
+                RD["status"] = "скачиваю RustDesk…"; _rd_download()
+            try: _rd_run(["--password", pw], timeout=40)
+            except Exception as e: log("RustDesk --password: %s" % e)
+            _rd_ensure_running()
+            rid = _rd_read_id()
+            doc_set("secure/rustdesk", {"pw": pw, "id": rid, "savedAt": datetime.datetime.now().isoformat(timespec="seconds")})
+            RD.update(id=rid, pw=pw, ok=bool(rid), at=time.time(),
+                      status=("готов" if rid else "ID не прочитан — возможно, нужны права администратора (поставить RustDesk один раз вручную)"))
+        except Exception as e:
+            RD.update(ok=False, status="ошибка установки: %s" % str(e)[:200])
+            log("RustDesk установка: %s" % e)
+def rd_tick():
+    if not (remote_on() or known_admin_pub()):
+        if RD["status"] != "выключено": RD.update(status="выключено", ok=False)
+        return
+    if os.name != "nt":
+        RD.update(status="только Windows"); return
+    if not RD.get("ok") or time.time() - RD.get("at", 0) > 1800:
+        rd_setup()
+    else:
+        _rd_ensure_running()
+def rd_payload():
+    """Запись этого компьютера для общего списка: ID (не секрет) и пароль в запечатанном конверте."""
+    if not RD.get("ok") or not RD.get("id"):
+        return None
+    out = {"id": RD["id"], "status": RD["status"]}
+    pub = known_admin_pub()
+    if pub and RD.get("pw"):
+        c = doc_get("secure/rd_enc_cache") or {}
+        if c.get("pub") == pub and c.get("id") == RD["id"] and c.get("pw") == RD["pw"] and c.get("box"):
+            out["enc"] = c["box"]
+        else:
+            box = seal_secret(pub, RD["pw"])
+            doc_set("secure/rd_enc_cache", {"pub": pub, "id": RD["id"], "pw": RD["pw"], "box": box})
+            out["enc"] = box
+    return out
+def rd_connect(target_pc):
+    """На компьютере владельца: расшифровать пароль цели своим закрытым ключом и запустить подключение RustDesk."""
+    priv, pub = admin_keys()
+    if not priv:
+        raise Exception("этот компьютер не управляющий — включите удалённый доступ на нём")
+    d = ((doc_get("shared/banquets") or {}).get("pcs") or {}).get(target_pc) or {}
+    rem = d.get("remote") or {}
+    if not rem.get("id"):
+        raise Exception("у этого компьютера ещё нет RustDesk ID")
+    if not rem.get("enc"):
+        raise Exception("пароль ещё не передан — подождите, пока тот компьютер обновит своё состояние")
+    pw = unseal_secret(priv, rem["enc"])
+    if os.name != "nt":
+        raise Exception("подключаться можно только с Windows")
+    if not os.path.exists(RD_EXE):
+        rd_setup()
+    import subprocess
+    flags = 0x08000000 if os.name == "nt" else 0
+    try:  # запасной путь: пароль в буфер обмена, если версия RustDesk не примет его из команды
+        subprocess.run("clip", input=pw, text=True, timeout=5)
+    except Exception:
+        pass
+    subprocess.Popen([RD_EXE, "--connect", rem["id"], "--password", pw], cwd=RD_DIR, creationflags=flags, close_fds=True)
+    log("RustDesk: подключение к %s (ID %s)" % (d.get("host") or target_pc, rem["id"]))
+    return {"host": d.get("host"), "id": rem["id"]}
+# ==================== конец блока удалённого доступа ====================
+
 def pc_id():
     d = doc_get("config/pc") or {}
     if not d.get("id"):
@@ -704,8 +922,18 @@ def push_banquets(force=False):
     state = pc_state()
     payload = {"pc": pid, "host": _socket.gethostname(), "updatedAt": datetime.datetime.now().isoformat(timespec="seconds"),
                "state": state, "items": items}
+    try:
+        rp = rd_payload()
+    except Exception as e:
+        rp = None; log("RustDesk запись: %s" % e)
+    if rp:
+        payload["remote"] = rp
+    _apriv, _apub = admin_keys()
+    if _apub and remote_on():
+        payload["admin"] = {"pub": _apub, "on": True}
+    rsig = "%s|%s|%s" % ((rp or {}).get("id", ""), (payload.get("admin") or {}).get("pub", ""), "enc" if (rp or {}).get("enc") else "")
     body_txt = json.dumps(payload, ensure_ascii=False, indent=0)
-    h = hashlib.sha256((json.dumps(items, ensure_ascii=False, sort_keys=True) + _state_sign(state)).encode()).hexdigest()
+    h = hashlib.sha256((json.dumps(items, ensure_ascii=False, sort_keys=True) + _state_sign(state) + rsig).encode()).hexdigest()
     SELF_PC.update({k: payload[k] for k in ("pc", "host", "state")})
     if h == _bq_push_hash[0] and not force and time.time() - _bq_push_at[0] < HEARTBEAT_SEC:
         return "без изменений"
@@ -1105,6 +1333,8 @@ def scheduler():
                 except Exception as e: log("Проверка обновлений: %s" % e)
             try: flush_iiko()
             except Exception as e: log("Очередь в iiko: %s" % e)
+            try: rd_tick()
+            except Exception as e: log("Удалённый доступ: %s" % e)
             hh, mm = CFG.get("akt_time", "23:00").split(":")
             if CFG.get("iiko_login") and now.hour == int(hh) and now.minute >= int(mm) and last_akt_day != now.date():
                 last_akt_day = now.date()
@@ -1254,12 +1484,18 @@ class Handler(BaseHTTPRequestHandler):
             others = []
             for d in (sh.get("pcs") or {}).values():
                 its = d.get("items") or []
+                rem = d.get("remote") or {}
                 others.append({"pc": d.get("pc"), "host": d.get("host"), "updatedAt": d.get("updatedAt"),
                                "state": d.get("state"), "banquets": len(its),
-                               "aktWait": len([i for i in its if i.get("status") == "closed" and i.get("iikoStatus") == "pending"])})
+                               "aktWait": len([i for i in its if i.get("status") == "closed" and i.get("iikoStatus") == "pending"]),
+                               "remote": {"id": rem.get("id"), "status": rem.get("status"), "hasEnc": bool(rem.get("enc"))}})
             others.sort(key=lambda d: d.get("updatedAt") or "", reverse=True)
+            me["remote"] = {"id": RD.get("id"), "status": RD.get("status")}
             return self._send(200, json.dumps({"now": datetime.datetime.now().isoformat(timespec="seconds"),
-                                               "pulledAt": sh.get("updatedAt"), "pcs": [me] + others}, ensure_ascii=False))
+                                               "pulledAt": sh.get("updatedAt"),
+                                               "remoteOn": bool(remote_on() or known_admin_pub()),
+                                               "canConnect": is_admin_pc(),
+                                               "pcs": [me] + others}, ensure_ascii=False))
         if p.path == "/api/status":
             return self._send(200, json.dumps({
                 "dry_run": dry_run(),
@@ -1378,6 +1614,26 @@ class Handler(BaseHTTPRequestHandler):
                     refresh_pins()
                     log("PIN в общий список не записан: %s" % e)
                     return self._send(200, json.dumps({"ok": True, "shared": False, "result": str(e)}, ensure_ascii=False))
+            if p.path in ("/api/remote/enable", "/api/remote/disable", "/api/remote/connect"):
+                ln = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
+                if (body.get("by") or "") not in CFG.get("pin_admins", [OWNER_ID]):
+                    return self._send(403, json.dumps({"error": "удалённым доступом управляет только владелец"}, ensure_ascii=False))
+                if p.path == "/api/remote/enable":
+                    ensure_admin_keys()
+                    dd = doc_get("secure/remote_admin") or {}; dd["on"] = True; doc_set("secure/remote_admin", dd)
+                    threading.Thread(target=lambda: (rd_setup(), sync_banquets(force=True)), daemon=True).start()
+                    return self._send(200, json.dumps({"ok": True, "result": "удалённый доступ включён, этот компьютер — управляющий"}, ensure_ascii=False))
+                if p.path == "/api/remote/disable":
+                    dd = doc_get("secure/remote_admin") or {}; dd["on"] = False; doc_set("secure/remote_admin", dd)
+                    try: sync_banquets(force=True)
+                    except Exception: pass
+                    return self._send(200, json.dumps({"ok": True, "result": "удалённый доступ выключен"}, ensure_ascii=False))
+                try:
+                    r = rd_connect(body.get("pc"))
+                    return self._send(200, json.dumps({"ok": True, "result": "подключаюсь к %s" % (r.get("host") or r.get("id"))}, ensure_ascii=False))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False))
             if p.path == "/api/push":
                 ln = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
