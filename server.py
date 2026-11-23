@@ -1487,12 +1487,16 @@ def _run_akty(shift_id=None):
             xml_body = ("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
                 "<document>"
                 "<status>NEW</status>"
+                "<accountToCode>%s</accountToCode>"
+                "<revenueAccountCode>%s</revenueAccountCode>"
                 "<documentNumber>%s</documentNumber>"
                 "<dateIncoming>%sT20:00:00</dateIncoming>"
                 "%s"
                 "<comment>%s</comment>"
                 "<items>%s</items>"
-                "</document>") % (xml_escape(doc_no), b.get("date"),
+                "</document>") % (xml_escape(str(CFG.get("akt_account_to", "5.01"))),      # Расход продуктов
+                                  xml_escape(str(CFG.get("akt_revenue_account", "4.01"))),  # Торговая выручка
+                                  xml_escape(doc_no), b.get("date"),
                                   ("<conceptionId>%s</conceptionId>" % conc_id) if conc_id else "",
                                   xml_escape(comment), "".join(items_xml))
             fn = os.path.join(LOG_DIR, "akt-%s-%s.xml" % (b.get("date"), x["id"][:8]))
@@ -1588,6 +1592,13 @@ def _run_payments():
                 todo.append((x, p))
     if not todo:
         return "новых оплат нет"
+    if not CFG.get("pko_endpoint"):
+        # В iiko нет способа принять приходный кассовый ордер из программы (проверено по описанию iiko 24.11.2026).
+        # Оплаты остаются во фронте; в iiko банкет виден актом реализации на счёте «Торговая выручка».
+        for x, p in todo:
+            p["exported"] = "только во фронте"
+            doc_set("banquets/" + x["id"], x["data"])
+        return "оплаты в iiko не отправляются (учтены во фронте): %d" % len(todo)
     dry = dry_run()
     ii = Iiko(CFG)
     done, skipped = 0, []
