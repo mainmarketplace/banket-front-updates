@@ -392,12 +392,48 @@ def check_update(force=False):
         UPDATING[0] = False
         raise
 
+_utok_cache = {"t": "", "at": 0}
+def update_token():
+    """Ключ GitHub «только чтение» для скачивания обновлений из закрытого репозитория. Лежит в общем gist
+    в закодированном виде; утечка такого ключа позволяет только читать код программы."""
+    t = CFG.get("update_token") or ""
+    if t:
+        return t
+    if _utok_cache["at"] and time.time() - _utok_cache["at"] < 600:
+        return _utok_cache["t"]
+    try:
+        import base64
+        s = json.loads(gist_raw("secrets.json")) or {}
+        t = base64.b64decode(s["update_token_b64"][::-1]).decode("utf-8").strip() if s.get("update_token_b64") else ""
+        _utok_cache.update(t=t, at=time.time())
+        return t
+    except Exception:
+        return _utok_cache["t"]
+
+_RAW_RE = re.compile(r"^https://raw\.githubusercontent\.com/([^/]+)/([^/]+)/([^/]+)/([^?]+)(\?.*)?$")
+def fetch_update_file(url, timeout=60):
+    """Файл обновления: при наличии ключа — через API GitHub (закрытый репозиторий, всегда свежий файл),
+    иначе или при ошибке — по прямой ссылке, как раньше."""
+    tok = update_token()
+    m = _RAW_RE.match(url)
+    if tok and m:
+        api = "https://api.github.com/repos/%s/%s/contents/%s?ref=%s" % (m.group(1), m.group(2), m.group(4), m.group(3))
+        req = urllib.request.Request(api)
+        req.add_header("Authorization", "Bearer " + tok)
+        req.add_header("Accept", "application/vnd.github.raw")
+        req.add_header("User-Agent", "banket-front")
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read()
+        except Exception as e:
+            log("Обновление через API GitHub не удалось (%s) — пробую прямую ссылку" % e)
+    return urllib.request.urlopen(url, timeout=timeout).read()
+
 def _check_update(force=False):
     url = CFG.get("update_url")
     if not url:
         return "адрес обновлений не задан"
-    man = json.loads(urllib.request.urlopen(url + ("&" if "?" in url else "?") + "t=%d" % int(time.time()),
-                                            timeout=30).read().decode("utf-8"))
+    man = json.loads(fetch_update_file(url + ("&" if "?" in url else "?") + "t=%d" % int(time.time()), timeout=30).decode("utf-8"))
     ver = str(man.get("version", ""))
     if not ver:
         return "манифест без версии"
@@ -408,7 +444,7 @@ def _check_update(force=False):
     for name, info in (man.get("files") or {}).items():
         if name not in UPDATABLE:
             continue
-        data = urllib.request.urlopen(info["url"], timeout=60).read()
+        data = fetch_update_file(info["url"], timeout=60)
         if hashlib.sha256(data).hexdigest() != info.get("sha256"):
             raise RuntimeError("контрольная сумма не совпала: " + name)
         dst = os.path.join(BASE, name)
@@ -540,6 +576,53 @@ def gist_api(method="GET", files=None, token=None):
     with urllib.request.urlopen(req, timeout=60) as r:
         return json.loads(r.read().decode("utf-8"))
 
+def _secrets_merge(upd, token=None):
+    g = gist_api("GET", token=token)
+    f = (g.get("files") or {}).get("secrets.json") or {}
+    try:
+        cur = json.loads(f.get("content") or "{}") or {}
+    except Exception:
+        cur = {}
+    cur.update(upd)
+    gist_api("PATCH", files={"secrets.json": {"content": json.dumps(cur, indent=1)}}, token=token)
+
+def setup_update_token(token):
+    """Проверить ключ «только чтение» на репозиторий обновлений и сохранить его для всех фронтов."""
+    import base64
+    token = (token or "").strip()
+    if not token:
+        raise Exception("ключ пустой")
+    m = _RAW_RE.match((CFG.get("update_url") or "").split("?")[0] + "")
+    if not m:
+        raise Exception("адрес обновлений не на GitHub")
+    req = urllib.request.Request("https://api.github.com/repos/%s/%s/contents/%s?ref=%s" % (m.group(1), m.group(2), m.group(4), m.group(3)))
+    req.add_header("Authorization", "Bearer " + token)
+    req.add_header("Accept", "application/vnd.github.raw")
+    req.add_header("User-Agent", "banket-front")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        man = json.loads(r.read().decode("utf-8"))
+    if not man.get("version"):
+        raise Exception("ключ открыл репозиторий, но манифест без версии")
+    enc = base64.b64encode(token.encode("utf-8")).decode("ascii")[::-1]
+    _secrets_merge({"update_token_b64": enc})
+    _utok_cache.update(t=token, at=time.time())
+    return "ключ проверен (видна версия %s) и сохранён для всех фронтов" % man["version"]
+
+SETUP_UPDATE_TOKEN_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><title>Ключ обновлений</title>
+<style>body{font:17px/1.5 'Segoe UI',sans-serif;background:#3F4040;color:#eee;display:flex;justify-content:center;padding:40px}
+.b{background:#323539;border:1px solid #494D53;border-radius:8px;padding:28px 32px;max-width:640px}
+input{width:100%;font-size:18px;padding:10px;border-radius:4px;border:1px solid #777;background:#222;color:#fff;font-family:Consolas,monospace}
+button{margin-top:14px;font-size:18px;padding:12px 26px;background:#E3E982;border:none;border-radius:4px;cursor:pointer;font-weight:700}
+#m{margin-top:14px;min-height:24px}</style></head><body><div class="b">
+<h2>Ключ для скачивания обновлений (только чтение)</h2>
+<p>Вставьте ключ (начинается с <b>github_pat_</b>) и нажмите «Сохранить». Программа проверит, что через него видна последняя версия, и положит его в общее хранилище — остальные фронты подхватят сами.</p>
+<input id="t" placeholder="github_pat_..." autofocus autocomplete="off">
+<button id="s">Сохранить</button><div id="m"></div>
+<script>document.getElementById('s').onclick=async()=>{const m=document.getElementById('m');m.textContent='Проверяю…';
+try{const r=await fetch('/api/setup-update-token',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:document.getElementById('t').value})}).then(x=>x.json());
+m.style.color=r.ok?'#9BE29B':'#FF8A80';m.textContent=r.result||r.error;if(r.ok)document.getElementById('t').value='';}catch(e){m.style.color='#FF8A80';m.textContent='Ошибка: '+e;}};</script>
+</div></body></html>"""
+
 def setup_token(token):
     """Проверить ключ и сохранить его в gist в закодированном виде — для всех фронтов."""
     import base64
@@ -550,7 +633,7 @@ def setup_token(token):
     if GIST_ID not in (g.get("id") or ""):
         raise Exception("ключ не даёт доступа к gist")
     enc = base64.b64encode(token.encode("utf-8")).decode("ascii")[::-1]
-    gist_api("PATCH", files={"secrets.json": {"content": json.dumps({"github_token_b64": enc}, indent=1)}}, token=token)
+    _secrets_merge({"github_token_b64": enc}, token=token)
     _tok_cache.update(t=token, at=time.time())
     return "ключ проверен и сохранён для всех фронтов"
 
@@ -892,7 +975,7 @@ def pc_state():
             "aktWait": akts, "payWait": pays, "oldestWait": oldest, "errors": errors[:5],
             "lastAkt": SYNC_STATE.get("last_akt"), "lastAktResult": str(SYNC_STATE.get("last_akt_result") or "")[:900],
             "lastPay": SYNC_STATE.get("last_pay"), "lastPayResult": str(SYNC_STATE.get("last_pay_result") or "")[:900],
-            "startedAt": STARTED_AT}
+            "startedAt": STARTED_AT, "updKey": bool(update_token())}
 
 def _state_sign(st):
     """Что в состоянии считается изменением (время последней попытки — нет, иначе писали бы без конца)."""
@@ -1398,6 +1481,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 lines = ["нет лога: %s" % e]
             return self._send(200, "".join(lines), "text/plain; charset=utf-8")
+        if p.path == "/setup-update-token":
+            return self._send(200, SETUP_UPDATE_TOKEN_HTML, "text/html; charset=utf-8")
         if p.path == "/setup-token":
             return self._send(200, SETUP_TOKEN_HTML, "text/html; charset=utf-8")
         if p.path in ("/favicon.png", "/favicon.ico", "/front.ico"):
@@ -1564,6 +1649,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, '{"result":"restarting"}')
             if p.path == "/api/akty":
                 return self._send(200, json.dumps({"result": run_akty()}, ensure_ascii=False))
+            if p.path == "/api/setup-update-token":
+                ln = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
+                try:
+                    return self._send(200, json.dumps({"ok": True, "result": setup_update_token(body.get("token"))}, ensure_ascii=False))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": "Ключ не принят: %s" % e}, ensure_ascii=False))
             if p.path == "/api/setup-token":
                 ln = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(ln).decode("utf-8") or "{}")
